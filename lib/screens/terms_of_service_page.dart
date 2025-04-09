@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'home_page.dart';
 import 'terms_and_conditions_page.dart';
 
 class TermsOfServicePage extends StatefulWidget {
@@ -152,11 +151,7 @@ class _TermsOfServicePageState extends State<TermsOfServicePage> {
           TextButton(
             onPressed: () {
               Navigator.of(context).pop();
-              Navigator.of(context).pushReplacement(
-                MaterialPageRoute(
-                  builder: (context) => const HomePage(),
-                ),
-              );
+              Navigator.of(context).pushReplacementNamed('/home');
             },
             child: const Text('OK'),
           ),

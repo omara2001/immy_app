@@ -1,12 +1,21 @@
 import 'package:flutter/material.dart';
 import '../widgets/subscription_banner.dart';
+import '../services/serial_service.dart';
+import '../services/api_service.dart';
 import 'insights_page.dart';
 import 'coach_page.dart';
 import 'payments_page.dart';
 import 'settings_page.dart';
 
 class HomePage extends StatefulWidget {
-  const HomePage({super.key});
+  final SerialService serialService;
+  final ApiService apiService;
+
+  const HomePage({
+    super.key, 
+    required this.serialService,
+    required this.apiService,
+  });
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -14,14 +23,36 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   int _selectedIndex = 0;
+  late List<Widget> _pages;
 
-  final List<Widget> _pages = [
-    const HomeContent(),
-    const InsightsPage(),
-    const CoachPage(),
-    const PaymentsPage(),
-    const SettingsPage(),
-  ];
+  @override
+  void initState() {
+    super.initState();
+    
+    // Initialize the pages with the services
+    _pages = [
+      const HomeContent(),
+      InsightsPage(apiService: widget.apiService),
+      CoachPage(apiService: widget.apiService),
+      const PaymentsPage(),
+      SettingsPage(serialService: widget.serialService),
+    ];
+    
+    // Initialize sample data for testing
+    _initSampleData();
+  }
+  
+  Future<void> _initSampleData() async {
+    try {
+      await widget.serialService.initWithSampleData();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error initializing data: $e')),
+        );
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -51,6 +82,12 @@ class _HomePageState extends State<HomePage> {
           ],
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.qr_code, color: Colors.white),
+            onPressed: () {
+              Navigator.pushNamed(context, '/serial-management');
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.notifications_outlined, color: Colors.white),
             onPressed: () {},
@@ -197,6 +234,9 @@ class HomeContent extends StatelessWidget {
                   'View what Emma has been learning',
                   const Color(0xFFE0E7FF), // indigo-100
                   const Color(0xFF4F46E5), // indigo-600
+                  onTap: () {
+                    Navigator.of(context).pushNamed('/serial-lookup');
+                  },
                 ),
                 _buildQuickActionCard(
                   context,
@@ -216,11 +256,14 @@ class HomeContent extends StatelessWidget {
                 ),
                 _buildQuickActionCard(
                   context,
-                  Icons.group_add,
-                  'Add Another Immy',
+                  Icons.qr_code,
+                  'Manage Devices',
                   'Link a new Immy bear',
                   const Color(0xFFEDE9FE), // purple-100
                   const Color(0xFF8B5CF6), // purple-600
+                  onTap: () {
+                    Navigator.of(context).pushNamed('/serial-management');
+                  },
                 ),
               ],
             ),
@@ -236,43 +279,46 @@ class HomeContent extends StatelessWidget {
     String title,
     String subtitle,
     Color bgColor,
-    Color iconColor,
-  ) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(12.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            CircleAvatar(
-              radius: 20,
-              backgroundColor: bgColor,
-              child: Icon(
-                icon,
-                size: 20,
-                color: iconColor,
+    Color iconColor, {
+    VoidCallback? onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Card(
+        child: Padding(
+          padding: const EdgeInsets.all(12.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              CircleAvatar(
+                radius: 20,
+                backgroundColor: bgColor,
+                child: Icon(
+                  icon,
+                  size: 20,
+                  color: iconColor,
+                ),
               ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              title,
-              style: const TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 14,
+              const SizedBox(height: 8),
+              Text(
+                title,
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                ),
               ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              subtitle,
-              style: const TextStyle(
-                fontSize: 12,
-                color: Color(0xFF6B7280), // gray-500
+              const SizedBox(height: 4),
+              Text(
+                subtitle,
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: Color(0xFF6B7280), // gray-500
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
   }
 }
-

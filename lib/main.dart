@@ -1,14 +1,32 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'pages/terms_of_service_page.dart';
-import 'pages/home_page.dart';
+import 'screens/terms_of_service_page.dart';
+import 'screens/home_page.dart';
+import 'screens/serial_management_screen.dart';
+import 'screens/serial_lookup_screen.dart';
+import 'services/serial_service.dart';
+import 'services/api_service.dart';
 
 void main() {
-  runApp(const MyApp());
+  // Initialize services
+  final serialService = SerialService();
+  final apiService = ApiService();
+  
+  runApp(MyApp(
+    serialService: serialService,
+    apiService: apiService,
+  ));
 }
 
 class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+  final SerialService serialService;
+  final ApiService apiService;
+  
+  const MyApp({
+    super.key, 
+    required this.serialService,
+    required this.apiService,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -35,7 +53,22 @@ class MyApp extends StatelessWidget {
         ),
         useMaterial3: true,
       ),
-      home: const SplashScreen(),
+      // Define named routes for easy navigation
+      routes: {
+        '/': (context) => const SplashScreen(),
+        '/home': (context) => HomePage(
+              serialService: serialService,
+              apiService: apiService,
+            ),
+        '/terms': (context) => const TermsOfServicePage(),
+        '/serial-management': (context) => SerialManagementScreen(
+              serialService: serialService,
+            ),
+        '/serial-lookup': (context) => SerialLookupScreen(
+              serialService: serialService,
+            ),
+      },
+      initialRoute: '/',
       debugShowCheckedModeBanner: false,
     );
   }
@@ -68,14 +101,10 @@ class _SplashScreenState extends State<SplashScreen> {
 
     if (termsAccepted) {
       // User has already accepted terms, go directly to home page
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (context) => const HomePage()),
-      );
+      Navigator.of(context).pushReplacementNamed('/home');
     } else {
       // First time user, show terms of service
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (context) => const TermsOfServicePage()),
-      );
+      Navigator.of(context).pushReplacementNamed('/terms');
     }
   }
 

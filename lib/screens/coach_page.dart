@@ -1,10 +1,151 @@
 import 'package:flutter/material.dart';
+import '../services/api_service.dart';
 
-class CoachPage extends StatelessWidget {
-  const CoachPage({super.key});
+class CoachPage extends StatefulWidget {
+  final ApiService apiService;
+
+  const CoachPage({
+    super.key,
+    required this.apiService,
+  });
+
+  @override
+  State<CoachPage> createState() => _CoachPageState();
+}
+
+class _CoachPageState extends State<CoachPage> {
+  bool _isLoading = false;
+  Map<String, dynamic>? _coachData;
+  String? _errorMessage;
+  final String _collectionName = 'emma_conversations'; // Default collection name
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCoachData();
+  }
+
+  Future<void> _loadCoachData() async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      // In a real app, this would fetch data from the API
+      // For demo purposes, we'll use mock data
+      // final enhancements = await widget.apiService.getEnhancements(_collectionName);
+      
+      // Mock data for demonstration
+      await Future.delayed(const Duration(seconds: 1)); // Simulate API call
+      _coachData = {
+        'engagement': 87,
+        'new_skills': 5,
+        'activities': 12,
+        'milestones': [
+          {
+            'title': 'Advanced Number Recognition',
+            'description': 'Successfully counted to 20 without help',
+            'bgColor': const Color(0xFFDCFCE7), // green-100
+            'iconColor': const Color(0xFF16A34A), // green-600
+            'icon': Icons.star,
+          },
+          {
+            'title': 'Scientific Curiosity',
+            'description': 'Growing interest in space and planets',
+            'bgColor': const Color(0xFFDDEEFD), // blue-100
+            'iconColor': const Color(0xFF2563EB), // blue-600
+            'icon': Icons.psychology,
+          },
+        ],
+        'activities': [
+          {
+            'title': 'Solar System Craft',
+            'description': 'Create a model solar system using household items to build on Emma\'s space interest.',
+            'bgColor': const Color(0xFFEDE9FE), // purple-50
+            'iconColor': const Color(0xFF8B5CF6), // purple-600
+            'icon': Icons.rocket,
+          },
+          {
+            'title': 'Number Scavenger Hunt',
+            'description': 'Find and count objects around the house to practice numbers up to 20.',
+            'bgColor': const Color(0xFFDDEEFD), // blue-50
+            'iconColor': const Color(0xFF2563EB), // blue-600
+            'icon': Icons.book,
+          },
+        ],
+        'tips': [
+          {
+            'title': 'Nurture Scientific Thinking',
+            'content': 'When Emma asks about space, encourage her to make predictions. Ask "What do you think happens when...?" to develop critical thinking skills.',
+          },
+          {
+            'title': 'Math in Daily Life',
+            'content': 'Include counting in everyday activities, like setting the table or sorting laundry, to reinforce number skills naturally.',
+          },
+        ],
+      };
+    } catch (e) {
+      setState(() {
+        _errorMessage = 'Failed to load coach data: $e';
+      });
+    } finally {
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    return _isLoading
+        ? const Center(child: CircularProgressIndicator())
+        : _errorMessage != null
+            ? _buildErrorView()
+            : _buildCoachView();
+  }
+
+  Widget _buildErrorView() {
+    return Padding(
+      padding: const EdgeInsets.all(16.0),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFEE2E2), // red-100
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: const Color(0xFFFCA5A5)), // red-300
+        ),
+        child: Column(
+          children: [
+            const Icon(
+              Icons.error_outline,
+              color: Color(0xFFEF4444), // red-500
+              size: 48,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              _errorMessage!,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: Color(0xFFB91C1C), // red-700
+              ),
+            ),
+            const SizedBox(height: 16),
+            ElevatedButton(
+              onPressed: _loadCoachData,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF8B5CF6), // purple-600
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Retry'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCoachView() {
     return SingleChildScrollView(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -57,9 +198,9 @@ class CoachPage extends StatelessWidget {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceAround,
                   children: [
-                    _buildStatCard('87%', 'Engagement'),
-                    _buildStatCard('5', 'New Skills'),
-                    _buildStatCard('12', 'Activities'),
+                    _buildStatCard('${_coachData!['engagement']}%', 'Engagement'),
+                    _buildStatCard(_coachData!['new_skills'].toString(), 'New Skills'),
+                    _buildStatCard(_coachData!['activities'].toString(), 'Activities'),
                   ],
                 ),
               ],
@@ -89,21 +230,18 @@ class CoachPage extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 16),
-                _buildMilestoneItem(
-                  'Advanced Number Recognition',
-                  'Successfully counted to 20 without help',
-                  const Color(0xFFDCFCE7), // green-100
-                  const Color(0xFF16A34A), // green-600
-                  Icons.star,
-                ),
-                const SizedBox(height: 12),
-                _buildMilestoneItem(
-                  'Scientific Curiosity',
-                  'Growing interest in space and planets',
-                  const Color(0xFFDDEEFD), // blue-100
-                  const Color(0xFF2563EB), // blue-600
-                  Icons.psychology,
-                ),
+                ..._coachData!['milestones'].map<Widget>((milestone) {
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 12.0),
+                    child: _buildMilestoneItem(
+                      milestone['title'],
+                      milestone['description'],
+                      milestone['bgColor'],
+                      milestone['iconColor'],
+                      milestone['icon'],
+                    ),
+                  );
+                }).toList(),
                 
                 const SizedBox(height: 24),
                 
@@ -126,21 +264,18 @@ class CoachPage extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 16),
-                _buildActivityCard(
-                  'Solar System Craft',
-                  'Create a model solar system using household items to build on Emma\'s space interest.',
-                  const Color(0xFFEDE9FE), // purple-50
-                  const Color(0xFF8B5CF6), // purple-600
-                  Icons.rocket,
-                ),
-                const SizedBox(height: 12),
-                _buildActivityCard(
-                  'Number Scavenger Hunt',
-                  'Find and count objects around the house to practice numbers up to 20.',
-                  const Color(0xFFDDEEFD), // blue-50
-                  const Color(0xFF2563EB), // blue-600
-                  Icons.book,
-                ),
+                ..._coachData!['activities'].map<Widget>((activity) {
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 12.0),
+                    child: _buildActivityCard(
+                      activity['title'],
+                      activity['description'],
+                      activity['bgColor'],
+                      activity['iconColor'],
+                      activity['icon'],
+                    ),
+                  );
+                }).toList(),
                 
                 const SizedBox(height: 24),
                 
@@ -163,15 +298,15 @@ class CoachPage extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 16),
-                _buildTipCard(
-                  'Nurture Scientific Thinking',
-                  'When Emma asks about space, encourage her to make predictions. Ask "What do you think happens when...?" to develop critical thinking skills.',
-                ),
-                const SizedBox(height: 12),
-                _buildTipCard(
-                  'Math in Daily Life',
-                  'Include counting in everyday activities, like setting the table or sorting laundry, to reinforce number skills naturally.',
-                ),
+                ..._coachData!['tips'].map<Widget>((tip) {
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 12.0),
+                    child: _buildTipCard(
+                      tip['title'],
+                      tip['content'],
+                    ),
+                  );
+                }).toList(),
                 
                 const SizedBox(height: 16),
                 Container(

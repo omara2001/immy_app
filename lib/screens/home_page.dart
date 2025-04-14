@@ -455,21 +455,21 @@ class HomeContent extends StatelessWidget {
                           onTap: () {
                             Navigator.of(context).pushNamed('/admin/dashboard');
                           },
-                          child: Padding(
-                            padding: const EdgeInsets.all(16.0),
+                          child: const Padding(
+                            padding: EdgeInsets.all(16.0),
                             child: Row(
                               children: [
                                 CircleAvatar(
                                   radius: 20,
-                                  backgroundColor: const Color(0xFFFEE2E2), // red-100
+                                  backgroundColor: Color(0xFFFEE2E2), // red-100
                                   child: Icon(
                                     Icons.admin_panel_settings,
                                     size: 20,
-                                    color: const Color(0xFFDC2626), // red-600
+                                    color: Color(0xFFDC2626), // red-600
                                   ),
                                 ),
-                                const SizedBox(width: 12),
-                                const Expanded(
+                                SizedBox(width: 12),
+                                Expanded(
                                   child: Column(
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
@@ -490,7 +490,7 @@ class HomeContent extends StatelessWidget {
                                     ],
                                   ),
                                 ),
-                                const Icon(Icons.arrow_forward_ios, size: 16),
+                                Icon(Icons.arrow_forward_ios, size: 16),
                               ],
                             ),
                           ),

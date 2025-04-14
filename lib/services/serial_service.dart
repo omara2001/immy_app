@@ -56,14 +56,14 @@ class SerialService {
           name: 'Administrator',
           email: 'administrator', // Simple username as requested
           isAdmin: true, // Set this user as admin
-          passwordHash: await PasswordUtil.hashPassword('admin'), // Simple password as requested
+          passwordHash: PasswordUtil.hashPassword('admin'), // Simple password as requested
         ),
         UserProfile(
           id: _uuid.v4(),
           name: 'Regular User',
           email: 'user@example.com',
           isAdmin: false,
-          passwordHash: await PasswordUtil.hashPassword('user123'),
+          passwordHash: PasswordUtil.hashPassword('user123'),
         ),
       ];
     

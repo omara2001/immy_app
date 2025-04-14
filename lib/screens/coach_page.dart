@@ -41,23 +41,6 @@ class _CoachPageState extends State<CoachPage> {
       _coachData = {
         'engagement': 87,
         'new_skills': 5,
-        'activities': 12,
-        'milestones': [
-          {
-            'title': 'Advanced Number Recognition',
-            'description': 'Successfully counted to 20 without help',
-            'bgColor': const Color(0xFFDCFCE7), // green-100
-            'iconColor': const Color(0xFF16A34A), // green-600
-            'icon': Icons.star,
-          },
-          {
-            'title': 'Scientific Curiosity',
-            'description': 'Growing interest in space and planets',
-            'bgColor': const Color(0xFFDDEEFD), // blue-100
-            'iconColor': const Color(0xFF2563EB), // blue-600
-            'icon': Icons.psychology,
-          },
-        ],
         'activities': [
           {
             'title': 'Solar System Craft',
@@ -72,6 +55,22 @@ class _CoachPageState extends State<CoachPage> {
             'bgColor': const Color(0xFFDDEEFD), // blue-50
             'iconColor': const Color(0xFF2563EB), // blue-600
             'icon': Icons.book,
+          },
+        ],
+        'milestones': [
+          {
+            'title': 'Advanced Number Recognition',
+            'description': 'Successfully counted to 20 without help',
+            'bgColor': const Color(0xFFDCFCE7), // green-100
+            'iconColor': const Color(0xFF16A34A), // green-600
+            'icon': Icons.star,
+          },
+          {
+            'title': 'Scientific Curiosity',
+            'description': 'Growing interest in space and planets',
+            'bgColor': const Color(0xFFDDEEFD), // blue-100
+            'iconColor': const Color(0xFF2563EB), // blue-600
+            'icon': Icons.psychology,
           },
         ],
         'tips': [
@@ -196,12 +195,32 @@ class _CoachPageState extends State<CoachPage> {
                 ),
                 const SizedBox(height: 16),
                 Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceAround,
                   children: [
                     _buildStatCard('${_coachData!['engagement']}%', 'Engagement'),
+                    const SizedBox(width: 16),
                     _buildStatCard(_coachData!['new_skills'].toString(), 'New Skills'),
-                    _buildStatCard(_coachData!['activities'].toString(), 'Activities'),
                   ],
+                ),
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          _coachData!['activities'][0]['title'] + ', ' + _coachData!['activities'][0]['description'],
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
@@ -349,31 +368,39 @@ class _CoachPageState extends State<CoachPage> {
   }
 
   Widget _buildStatCard(String value, String label) {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Column(
-        children: [
-          Text(
-            value,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 24,
-              fontWeight: FontWeight.bold,
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+        decoration: BoxDecoration(
+          color: label == 'Engagement' 
+              ? const Color(0xFFE0E7FF) // indigo-100
+              : const Color(0xFFFCE7F3), // pink-100
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              value,
+              style: TextStyle(
+                color: label == 'Engagement' 
+                    ? const Color(0xFF4F46E5) // indigo-600
+                    : const Color(0xFFDB2777), // pink-600
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+              ),
             ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            label,
-            style: TextStyle(
-              color: Colors.white.withOpacity(0.9),
-              fontSize: 12,
+            Text(
+              label,
+              style: TextStyle(
+                color: label == 'Engagement' 
+                    ? const Color(0xFF4F46E5).withOpacity(0.8) // indigo-600
+                    : const Color(0xFFDB2777).withOpacity(0.8), // pink-600
+                fontSize: 14,
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

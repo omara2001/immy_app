@@ -334,6 +334,7 @@ class _SerialManagementScreenState extends State<SerialManagementScreen> {
                                         id: '',
                                         name: 'Unknown',
                                         email: '',
+                                        // No need to specify passwordHash as it's optional now
                                       ),
                                     )
                                   : null;

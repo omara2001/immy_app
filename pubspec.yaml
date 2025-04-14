@@ -18,6 +18,7 @@ dependencies:
   http_parser: ^4.0.2
   uuid: ^3.0.7
   path_provider: ^2.1.0
+  crypto: ^3.0.3  # Added this line for password hashing
 
 dev_dependencies:
   flutter_test:

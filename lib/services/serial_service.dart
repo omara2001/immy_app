@@ -1,7 +1,9 @@
+import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
+import 'dart:ui';
+import 'dart:io'; // Add this import for File and Directory
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:qr_flutter/qr_flutter.dart';
@@ -9,14 +11,37 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 import '../models/user_profile.dart';
 import '../models/serial_number.dart';
+import '../services/auth_service.dart';
+import '../utils/password_util.dart'; // Make sure this path is correct
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/rendering.dart';
+
+// Conditional imports
+import 'dart:io' if (kIsWeb) 'dart:html' as html;
 
 class SerialService {
   static const String _userProfilesKey = 'user_profiles';
   static const String _serialNumbersKey = 'serial_numbers';
   final Uuid _uuid = const Uuid();
+  final AuthService _authService = AuthService();
+  
+  // Check if the current user is an admin before performing admin-only operations
+  Future<void> _checkAdminAccess() async {
+    final isAdmin = await _authService.isCurrentUserAdmin();
+    if (!isAdmin) {
+      throw Exception('Access denied: Admin privileges required');
+    }
+  }
   
   // Initialize with sample data for testing
   Future<void> initWithSampleData() async {
+    // This is an admin-only operation after the first setup
+    try {
+      await _checkAdminAccess();
+    } catch (e) {
+      // Ignore the error for initial setup
+    }
+    
     final prefs = await SharedPreferences.getInstance();
     
     // Check if we already have data
@@ -24,29 +49,33 @@ class SerialService {
     final hasSerials = prefs.containsKey(_serialNumbersKey);
     
     if (!hasProfiles || !hasSerials) {
-      // Create sample users
+      // Create sample users with password hashes
       final users = [
         UserProfile(
           id: _uuid.v4(),
-          name: 'Emma',
-          email: 'emma@example.com',
+          name: 'Administrator',
+          email: 'administrator', // Simple username as requested
+          isAdmin: true, // Set this user as admin
+          passwordHash: await PasswordUtil.hashPassword('admin'), // Simple password as requested
         ),
         UserProfile(
           id: _uuid.v4(),
-          name: 'Oliver',
-          email: 'oliver@example.com',
+          name: 'Regular User',
+          email: 'user@example.com',
+          isAdmin: false,
+          passwordHash: await PasswordUtil.hashPassword('user123'),
         ),
       ];
-      
+    
       // Save users
       await prefs.setString(_userProfilesKey, jsonEncode(users.map((u) => u.toJson()).toList()));
-      
+    
       // Generate sample serials
       final serials = <SerialNumber>[];
       for (int i = 0; i < 5; i++) {
         final serial = generateSerialNumber();
         final qrCodePath = await generateQrCode(serial);
-        
+      
         serials.add(SerialNumber(
           id: _uuid.v4(),
           serial: serial,
@@ -55,7 +84,7 @@ class SerialService {
           assignedToUserId: i < 2 ? users[i].id : null,
         ));
       }
-      
+    
       // Save serials
       await prefs.setString(_serialNumbersKey, jsonEncode(serials.map((s) => s.toJson()).toList()));
     }
@@ -78,21 +107,86 @@ class SerialService {
       backgroundColor: Colors.white,
     );
     
-    // Convert to image and save to file
-    final directory = await getApplicationDocumentsDirectory();
-    final path = '${directory.path}/qr_codes';
-    await Directory(path).create(recursive: true);
+    // Handle web vs mobile
+    if (kIsWeb) {
+      // For web, just return a placeholder URL - no need to download
+      return 'qr_$serial.png';
+    } else {
+      // On mobile, save the QR code to the local file system
+      try {
+        final directory = await getApplicationDocumentsDirectory();
+        final path = '${directory.path}/qr_codes';
+        await Directory(path).create(recursive: true);
+        
+        final filePath = '$path/qr_$serial.png';
+        
+        // Convert the QR widget to image bytes and save to file
+        final qrImage = await _getQrImageBytes(qrCode);
+        final file = File(filePath);
+        await file.writeAsBytes(qrImage);
+        
+        return filePath;
+      } catch (e) {
+        // If there's an error saving the file, return a placeholder
+        print('Error saving QR code: $e');
+        return 'qr_$serial.png';
+      }
+    }
+  }
+
+  // Helper function to generate the image bytes for the QR code
+  Future<Uint8List> _getQrImageBytes(QrImageView qrCode) async {
+    try {
+      final boundary = await _createQrBoundary(qrCode);
+      final image = await boundary.toImage(pixelRatio: 3.0);
+      final byteData = await image.toByteData(format: ImageByteFormat.png);
+      if (byteData == null) throw Exception('Failed to generate QR code image');
+      return byteData.buffer.asUint8List();
+    } catch (e) {
+      throw Exception('Failed to generate QR code: $e');
+    }
+  }
+
+  Future<RenderRepaintBoundary> _createQrBoundary(QrImageView qrCode) async {
+    final key = GlobalKey();
+    final RepaintBoundary boundary = RepaintBoundary(
+      key: key,
+      child: qrCode,
+    );
+
+    // Create a temporary widget to render the QR code
+    final widget = MaterialApp(
+      home: Scaffold(body: boundary),
+    );
+
+    final BuildContext context = await _createTemporaryContext(widget);
+    await Future.delayed(const Duration(milliseconds: 100)); // Allow widget to render
     
-    final filePath = '$path/qr_$serial.png';
+    final RenderRepaintBoundary renderObject = 
+        key.currentContext!.findRenderObject() as RenderRepaintBoundary;
+    return renderObject;
+  }
+
+  Future<BuildContext> _createTemporaryContext(Widget widget) async {
+    late BuildContext context;
+    final completer = Completer<BuildContext>();
     
-    // This is a simplified approach - in a real app, you'd need to render the QR widget to an image
-    // For demonstration purposes, we'll just return the path where it would be saved
+    runApp(Builder(builder: (ctx) {
+      context = ctx;
+      completer.complete(ctx);
+      return widget;
+    }));
     
-    return filePath;
+    return completer.future;
   }
   
   // Create a new user profile
-  Future<UserProfile> createUserProfile(String name, String email) async {
+  Future<UserProfile> createUserProfile(String name, String email, {bool isAdmin = false}) async {
+    // Only admins can create admin users
+    if (isAdmin) {
+      await _checkAdminAccess();
+    }
+    
     final prefs = await SharedPreferences.getInstance();
     
     // Get existing profiles
@@ -108,6 +202,7 @@ class SerialService {
       id: _uuid.v4(),
       name: name,
       email: email,
+      isAdmin: isAdmin,
     );
     
     // Add to list and save
@@ -117,8 +212,11 @@ class SerialService {
     return newProfile;
   }
   
-  // Generate multiple serial numbers
+  // Generate multiple serial numbers - admin only
   Future<List<SerialNumber>> generateSerials(int count) async {
+    // This is an admin-only operation
+    await _checkAdminAccess();
+    
     final prefs = await SharedPreferences.getInstance();
     
     // Get existing serials
@@ -146,8 +244,11 @@ class SerialService {
     return newSerials;
   }
   
-  // Assign a serial number to a user
+  // Assign a serial number to a user - admin only
   Future<void> assignSerialToUser(UserProfile user, SerialNumber serial) async {
+    // This is an admin-only operation
+    await _checkAdminAccess();
+    
     final prefs = await SharedPreferences.getInstance();
     
     // Get existing serials
@@ -165,8 +266,11 @@ class SerialService {
     await prefs.setString(_serialNumbersKey, jsonEncode(serials.map((s) => s.toJson()).toList()));
   }
   
-  // Replace a user's serial number with a new one
+  // Replace a user's serial number with a new one - admin only
   Future<void> replaceSerial(UserProfile user, SerialNumber newSerial) async {
+    // This is an admin-only operation
+    await _checkAdminAccess();
+    
     final prefs = await SharedPreferences.getInstance();
     
     // Get existing serials
@@ -191,41 +295,56 @@ class SerialService {
     await prefs.setString(_serialNumbersKey, jsonEncode(serials.map((s) => s.toJson()).toList()));
   }
   
-  // Get all serial numbers
+  // Get all serial numbers - admin only
   Future<List<SerialNumber>> getSerialList() async {
+    // This is an admin-only operation
+    await _checkAdminAccess();
+    
     return await _getSerialNumbers();
   }
   
-  // Get unassigned serial numbers
+  // Get unassigned serial numbers - admin only
   Future<List<SerialNumber>> getUnassignedSerials() async {
+    // This is an admin-only operation
+    await _checkAdminAccess();
+    
     final serials = await _getSerialNumbers();
     return serials.where((serial) => serial.assignedToUserId == null).toList();
   }
   
-  // Get a user's serial number
+  // Get a user's serial number - can be used by any user to get their own serial
   Future<SerialNumber?> getUserSerial(String email) async {
+    final currentUser = await _authService.getCurrentUser();
     final profiles = await _getUserProfiles();
     final serials = await _getSerialNumbers();
     
     // Find user by email
     final userList = profiles.where((profile) => profile.email == email).toList();
     if (userList.isEmpty) {
-      return null; // Return null instead of throwing an exception
+      return null;
     }
     
     final user = userList.first;
     
+    // If not admin and trying to access someone else's serial, deny access
+    if (!(currentUser?.isAdmin ?? false) && currentUser?.email != email) {
+      throw Exception('Access denied: You can only view your own serial number');
+    }
+    
     // Find serial assigned to user
     final userSerials = serials.where((serial) => serial.assignedToUserId == user.id).toList();
     if (userSerials.isEmpty) {
-      return null; // Return null instead of throwing an exception
+      return null;
     }
     
     return userSerials.first;
   }
   
-  // Get all users
+  // Get all users - admin only
   Future<List<UserProfile>> getAllUsers() async {
+    // This is an admin-only operation
+    await _checkAdminAccess();
+    
     return await _getUserProfiles();
   }
   

@@ -4,28 +4,35 @@ import 'screens/terms_of_service_page.dart';
 import 'screens/home_page.dart';
 import 'screens/serial_management_screen.dart';
 import 'screens/serial_lookup_screen.dart';
+import 'screens/admin_login_screen.dart';
+import 'screens/admin_dashboard_screen.dart';
 import 'services/serial_service.dart';
 import 'services/api_service.dart';
+import 'services/auth_service.dart';
 
 void main() {
   // Initialize services
   final serialService = SerialService();
   final apiService = ApiService();
+  final authService = AuthService();
   
   runApp(MyApp(
     serialService: serialService,
     apiService: apiService,
+    authService: authService,
   ));
 }
 
 class MyApp extends StatelessWidget {
   final SerialService serialService;
   final ApiService apiService;
+  final AuthService authService;
   
   const MyApp({
     super.key, 
     required this.serialService,
     required this.apiService,
+    required this.authService,
   });
 
   @override
@@ -66,6 +73,13 @@ class MyApp extends StatelessWidget {
             ),
         '/serial-lookup': (context) => SerialLookupScreen(
               serialService: serialService,
+            ),
+        '/admin/login': (context) => AdminLoginScreen(
+              authService: authService,
+            ),
+        '/admin/dashboard': (context) => AdminDashboardScreen(
+              serialService: serialService,
+              authService: authService,
             ),
       },
       initialRoute: '/',

@@ -9,6 +9,7 @@ import 'insights_page.dart';
 import 'coach_page.dart';
 import 'payments_page.dart';
 import 'settings_page.dart';
+import 'recent_conversations_screen.dart';
 
 class HomePage extends StatefulWidget {
   final SerialService serialService;
@@ -257,6 +258,14 @@ class _HomePageState extends State<HomePage> {
             onTap: () => _updateIndex(0),
           ),
           ListTile(
+            leading: const Icon(Icons.history),
+            title: const Text('Recent Conversations'),
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.pushNamed(context, '/recent-conversations');
+            },
+          ),
+          ListTile(
             leading: const Icon(Icons.qr_code),
             title: const Text('Serial Management'),
             onTap: () => Navigator.pushNamed(context, '/serial-management'),
@@ -405,7 +414,7 @@ class HomeContent extends StatelessWidget {
                   'View what Emma has been learning',
                   const Color(0xFFE0E7FF),
                   const Color(0xFF4F46E5),
-                  onTap: () => Navigator.pushNamed(context, '/serial-lookup'),
+                  onTap: () => Navigator.pushNamed(context, '/recent-conversations'),
                 ),
                 _buildQuickActionCard(
                   context,

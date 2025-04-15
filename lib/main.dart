@@ -7,7 +7,8 @@ import 'screens/serial_management_screen.dart';
 import 'screens/serial_lookup_screen.dart';
 import 'screens/admin_login_screen.dart';
 import 'screens/admin_dashboard_screen.dart';
-import 'screens/login_screen.dart'; // Import the missing LoginScreen
+import 'screens/login_screen.dart';
+import 'screens/recent_conversations_screen.dart';
 import 'services/serial_service.dart';
 import 'services/api_service.dart';
 import 'services/auth_service.dart' as auth_service;
@@ -18,7 +19,7 @@ void main() {
   final serialService = SerialService();
   final apiService = ApiService();
   final authService = auth_service.AuthService();
-  final usersAuthService =users_auth_service.AuthService();
+  final usersAuthService = users_auth_service.AuthService();
   
   runApp(MyApp(
     serialService: serialService,
@@ -72,6 +73,7 @@ class MyApp extends StatelessWidget {
         '/home': (context) => HomePage(
               serialService: serialService,
               apiService: apiService,
+              authService: authService,
             ),
         '/terms': (context) => const TermsOfServicePage(),
         '/serial-management': (context) => SerialManagementScreen(
@@ -85,6 +87,10 @@ class MyApp extends StatelessWidget {
             ),
         '/admin/dashboard': (context) => AdminDashboardScreen(
               serialService: serialService,
+              authService: authService,
+            ),
+        '/recent-conversations': (context) => RecentConversationsScreen(
+              apiService: apiService,
               authService: authService,
             ),
       },
@@ -102,7 +108,7 @@ class SplashScreen extends StatefulWidget {
 }
 
 class _SplashScreenState extends State<SplashScreen> {
-  final usersAuthService =users_auth_service.AuthService();
+  final usersAuthService = users_auth_service.AuthService();
   
   @override
   void initState() {

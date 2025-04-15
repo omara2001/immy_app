@@ -17,7 +17,6 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/rendering.dart';
 
 // Conditional imports
-import 'dart:io' if (kIsWeb) 'dart:html' as html;
 
 class SerialService {
   static const String _userProfilesKey = 'user_profiles';

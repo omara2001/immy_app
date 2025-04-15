@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:immy_app/models/user.dart';
 import '../widgets/subscription_banner.dart';
 import '../services/serial_service.dart';
 import '../services/api_service.dart';
-import '../services/auth_service.dart';
+import '../services/auth_service.dart' as auth_service;
+import '../services/users_auth_service.dart' as users_auth_service;
 import 'insights_page.dart';
 import 'coach_page.dart';
 import 'payments_page.dart';
@@ -11,13 +13,15 @@ import 'settings_page.dart';
 class HomePage extends StatefulWidget {
   final SerialService serialService;
   final ApiService apiService;
-  final AuthService? authService; // Make optional for backward compatibility
+  final auth_service.AuthService? authService;
+  final users_auth_service.AuthService? usersAuthService; // Use aliased type
 
   const HomePage({
     super.key, 
     required this.serialService,
     required this.apiService,
     this.authService,
+    this.usersAuthService,
   });
 
   @override
@@ -28,12 +32,13 @@ class _HomePageState extends State<HomePage> {
   int _selectedIndex = 0;
   late List<Widget> _pages;
   bool _isAdmin = false;
+  bool _isLoading = true;
+  String _userName = '';
 
   @override
   void initState() {
     super.initState();
     
-    // Initialize the pages with the services
     _pages = [
       const HomeContent(),
       InsightsPage(apiService: widget.apiService),
@@ -42,30 +47,62 @@ class _HomePageState extends State<HomePage> {
       SettingsPage(serialService: widget.serialService),
     ];
     
-    // Initialize sample data for testing
     _initSampleData();
-    
-    // Check if user is admin
     _checkAdminStatus();
+    _loadUserData();
   }
-  
+
+   Future<void> _loadUserData() async {
+    if (widget.authService == null) return;
+    
+    setState(() => _isLoading = true);
+    try {
+      final user = await widget.authService!.getCurrentUser();
+      if (mounted && user != null) {
+        setState(() {
+          _userName = user.name; // Ensure user object has 'name' property
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      print('Error loading user: $e');
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _userName = 'Error loading name';
+        });
+      }
+    }
+  }
+
   Future<void> _initSampleData() async {
     try {
-      // This will now throw an exception if the user is not an admin
       await widget.serialService.initWithSampleData();
     } catch (e) {
-      // It's okay if this fails due to admin restrictions
       print('Note: Sample data initialization restricted: $e');
     }
   }
-  
+
   Future<void> _checkAdminStatus() async {
     if (widget.authService != null) {
       final isAdmin = await widget.authService!.isCurrentUserAdmin();
       if (mounted) {
-        setState(() {
-          _isAdmin = isAdmin;
-        });
+        setState(() => _isAdmin = isAdmin);
+      }
+    }
+  }
+
+  Future<void> _logout() async {
+    try {
+      await widget.authService?.logout();
+      if (mounted) {
+        Navigator.of(context).pushReplacementNamed('/login');
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Logout error: $e')),
+        );
       }
     }
   }
@@ -74,7 +111,7 @@ class _HomePageState extends State<HomePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: const Color(0xFF8B5CF6), // purple-600
+        backgroundColor: const Color(0xFF8B5CF6),
         title: const Row(
           children: [
             CircleAvatar(
@@ -82,7 +119,7 @@ class _HomePageState extends State<HomePage> {
               child: Text(
                 'IA',
                 style: TextStyle(
-                  color: Color(0xFF8B5CF6), // purple-600
+                  color: Color(0xFF8B5CF6),
                   fontWeight: FontWeight.bold,
                 ),
               ),
@@ -100,28 +137,57 @@ class _HomePageState extends State<HomePage> {
         actions: [
           IconButton(
             icon: const Icon(Icons.qr_code, color: Colors.white),
-            onPressed: () {
-              Navigator.pushNamed(context, '/serial-management');
-            },
+            onPressed: () => Navigator.pushNamed(context, '/serial-management'),
           ),
-          // Add admin icon if user is admin
           if (_isAdmin)
             IconButton(
               icon: const Icon(Icons.admin_panel_settings, color: Colors.white),
               tooltip: 'Admin Dashboard',
-              onPressed: () {
-                Navigator.pushNamed(context, '/admin/dashboard');
-              },
+              onPressed: () => Navigator.pushNamed(context, '/admin/dashboard'),
             ),
           IconButton(
             icon: const Icon(Icons.notifications_outlined, color: Colors.white),
             onPressed: () {},
           ),
-          IconButton(
+          PopupMenuButton<String>(
             icon: const Icon(Icons.menu, color: Colors.white),
-            onPressed: () {
-              _showAppDrawer(context);
+            onSelected: (value) {
+              if (value == 'logout') _logout();
+              if (value == 'settings') _selectedIndex = 4;
             },
+            itemBuilder: (context) => [
+              PopupMenuItem(
+                value: 'profile',
+                child: Row(
+                  children: [
+                    const Icon(Icons.person, color: Color(0xFF8B5CF6)),
+                    const SizedBox(width: 8),
+                    Text(_isLoading ? 'Loading...' : 'Hi, $_userName'),
+                  ],
+                ),
+              ),
+              const PopupMenuItem(
+                value: 'settings',
+                child: Row(
+                  children: [
+                    Icon(Icons.settings, color: Color(0xFF8B5CF6)),
+                    SizedBox(width: 8),
+                    Text('Settings'),
+                  ],
+                ),
+              ),
+              const PopupMenuDivider(),
+              const PopupMenuItem(
+                value: 'logout',
+                child: Row(
+                  children: [
+                    Icon(Icons.logout, color: Color(0xFF8B5CF6)),
+                    SizedBox(width: 8),
+                    Text('Logout'),
+                  ],
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -129,53 +195,28 @@ class _HomePageState extends State<HomePage> {
       body: _pages[_selectedIndex],
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _selectedIndex,
-        onTap: (index) {
-          setState(() {
-            _selectedIndex = index;
-          });
-        },
+        onTap: (index) => setState(() => _selectedIndex = index),
         type: BottomNavigationBarType.fixed,
-        selectedItemColor: const Color(0xFF8B5CF6), // purple-600
-        unselectedItemColor: const Color(0xFF6B7280), // gray-500
+        selectedItemColor: const Color(0xFF8B5CF6),
+        unselectedItemColor: const Color(0xFF6B7280),
         items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.home),
-            label: 'Home',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.chat_bubble_outline),
-            label: 'Insights',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.school),
-            label: 'Coach',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.payment),
-            label: 'Payments',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.settings),
-            label: 'Settings',
-          ),
+          BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
+          BottomNavigationBarItem(icon: Icon(Icons.chat_bubble_outline), label: 'Insights'),
+          BottomNavigationBarItem(icon: Icon(Icons.school), label: 'Coach'),
+          BottomNavigationBarItem(icon: Icon(Icons.payment), label: 'Payments'),
+          BottomNavigationBarItem(icon: Icon(Icons.settings), label: 'Settings'),
         ],
       ),
     );
   }
-  
-  void _showAppDrawer(BuildContext context) {
-    Scaffold.of(context).openDrawer();
-  }
-  
+
   Widget _buildDrawer(BuildContext context) {
     return Drawer(
       child: ListView(
         padding: EdgeInsets.zero,
         children: [
           DrawerHeader(
-            decoration: const BoxDecoration(
-              color: Color(0xFF8B5CF6), // purple-600
-            ),
+            decoration: const BoxDecoration(color: Color(0xFF8B5CF6)),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -185,16 +226,16 @@ class _HomePageState extends State<HomePage> {
                   child: Text(
                     'IA',
                     style: TextStyle(
-                      color: Color(0xFF8B5CF6), // purple-600
+                      color: Color(0xFF8B5CF6),
                       fontWeight: FontWeight.bold,
                       fontSize: 24,
                     ),
                   ),
                 ),
                 const SizedBox(height: 12),
-                const Text(
-                  'Immy App',
-                  style: TextStyle(
+                Text(
+                  _isLoading ? 'Loading...' : _userName,
+                  style: const TextStyle(
                     color: Colors.white,
                     fontWeight: FontWeight.bold,
                     fontSize: 20,
@@ -213,30 +254,18 @@ class _HomePageState extends State<HomePage> {
           ListTile(
             leading: const Icon(Icons.home),
             title: const Text('Home'),
-            onTap: () {
-              Navigator.pop(context);
-              setState(() {
-                _selectedIndex = 0;
-              });
-            },
+            onTap: () => _updateIndex(0),
           ),
           ListTile(
             leading: const Icon(Icons.qr_code),
             title: const Text('Serial Management'),
-            onTap: () {
-              Navigator.pop(context);
-              Navigator.pushNamed(context, '/serial-management');
-            },
+            onTap: () => Navigator.pushNamed(context, '/serial-management'),
           ),
           ListTile(
             leading: const Icon(Icons.search),
             title: const Text('Serial Lookup'),
-            onTap: () {
-              Navigator.pop(context);
-              Navigator.pushNamed(context, '/serial-lookup');
-            },
+            onTap: () => Navigator.pushNamed(context, '/serial-lookup'),
           ),
-          // Admin section
           if (widget.authService != null) ...[
             const Divider(),
             const Padding(
@@ -244,59 +273,37 @@ class _HomePageState extends State<HomePage> {
               child: Text(
                 'Administration',
                 style: TextStyle(
-                  color: Color(0xFF6B7280), // gray-500
+                  color: Color(0xFF6B7280),
                   fontWeight: FontWeight.bold,
                 ),
               ),
             ),
-            if (_isAdmin)
-              ListTile(
-                leading: const Icon(Icons.admin_panel_settings),
-                title: const Text('Admin Dashboard'),
-                onTap: () {
-                  Navigator.pop(context);
-                  Navigator.pushNamed(context, '/admin/dashboard');
-                },
-              )
-            else
-              ListTile(
-                leading: const Icon(Icons.login),
-                title: const Text('Admin Login'),
-                onTap: () {
-                  Navigator.pop(context);
-                  Navigator.pushNamed(context, '/admin/login');
-                },
-              ),
+            _isAdmin
+              ? ListTile(
+                  leading: const Icon(Icons.admin_panel_settings),
+                  title: const Text('Admin Dashboard'),
+                  onTap: () => Navigator.pushNamed(context, '/admin/dashboard'),
+                )
+              : ListTile(
+                  leading: const Icon(Icons.login),
+                  title: const Text('Admin Login'),
+                  onTap: () => Navigator.pushNamed(context, '/admin/login'),
+                ),
           ],
           const Divider(),
           ListTile(
-            leading: const Icon(Icons.help_outline),
-            title: const Text('Help & Support'),
-            onTap: () {
-              Navigator.pop(context);
-              // Navigate to help page
-            },
+            leading: const Icon(Icons.logout),
+            title: const Text('Logout'),
+            onTap: _logout,
           ),
-          if (_isAdmin && widget.authService != null)
-            ListTile(
-              leading: const Icon(Icons.logout),
-              title: const Text('Logout'),
-              onTap: () async {
-                await widget.authService!.logout();
-                if (mounted) {
-                  setState(() {
-                    _isAdmin = false;
-                  });
-                  Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Logged out successfully')),
-                  );
-                }
-              },
-            ),
         ],
       ),
     );
+  }
+
+  void _updateIndex(int index) {
+    Navigator.pop(context);
+    setState(() => _selectedIndex = index);
   }
 }
 
@@ -322,11 +329,11 @@ class HomeContent extends StatelessWidget {
                       children: [
                         CircleAvatar(
                           radius: 20,
-                          backgroundColor: Color(0xFFDDEEFD), // blue-100
+                          backgroundColor: Color(0xFFDDEEFD),
                           child: Text(
                             'IB',
                             style: TextStyle(
-                              color: Color(0xFF1E40AF), // blue-800
+                              color: Color(0xFF1E40AF),
                               fontWeight: FontWeight.bold,
                             ),
                           ),
@@ -347,7 +354,7 @@ class HomeContent extends StatelessWidget {
                                 'Last active: 25 minutes ago',
                                 style: TextStyle(
                                   fontSize: 12,
-                                  color: Color(0xFF6B7280), // gray-500
+                                  color: Color(0xFF6B7280),
                                 ),
                               ),
                             ],
@@ -359,14 +366,14 @@ class HomeContent extends StatelessWidget {
                     Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFEFF6FF), // blue-50
+                        color: const Color(0xFFEFF6FF),
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: const Text(
                         '"Today, Emma learned about dinosaurs and practiced counting to 20."',
                         style: TextStyle(
                           fontSize: 14,
-                          color: Color(0xFF1E40AF), // blue-800
+                          color: Color(0xFF1E40AF),
                         ),
                       ),
                     ),
@@ -396,45 +403,39 @@ class HomeContent extends StatelessWidget {
                   Icons.history,
                   'Recent Conversations',
                   'View what Emma has been learning',
-                  const Color(0xFFE0E7FF), // indigo-100
-                  const Color(0xFF4F46E5), // indigo-600
-                  onTap: () {
-                    Navigator.of(context).pushNamed('/serial-lookup');
-                  },
+                  const Color(0xFFE0E7FF),
+                  const Color(0xFF4F46E5),
+                  onTap: () => Navigator.pushNamed(context, '/serial-lookup'),
                 ),
                 _buildQuickActionCard(
                   context,
                   Icons.trending_up,
                   'Learning Journey',
                   'Adjust learning preferences',
-                  const Color(0xFFDCFCE7), // green-100
-                  const Color(0xFF16A34A), // green-600
+                  const Color(0xFFDCFCE7),
+                  const Color(0xFF16A34A),
                 ),
                 _buildQuickActionCard(
                   context,
                   Icons.book,
                   'Story Time',
                   'Browse magical stories',
-                  const Color(0xFFFEF3C7), // amber-100
-                  const Color(0xFFD97706), // amber-600
+                  const Color(0xFFFEF3C7),
+                  const Color(0xFFD97706),
                 ),
                 _buildQuickActionCard(
                   context,
                   Icons.qr_code,
                   'Manage Devices',
                   'Link a new Immy bear',
-                  const Color(0xFFEDE9FE), // purple-100
-                  const Color(0xFF8B5CF6), // purple-600
-                  onTap: () {
-                    Navigator.of(context).pushNamed('/serial-management');
-                  },
+                  const Color(0xFFEDE9FE),
+                  const Color(0xFF8B5CF6),
+                  onTap: () => Navigator.pushNamed(context, '/serial-management'),
                 ),
               ],
             ),
-            // Add Admin Card if needed
             Builder(
               builder: (context) {
-                // Access the HomePage state to check admin status
                 final homePageState = context.findAncestorStateOfType<_HomePageState>();
                 if (homePageState != null && homePageState._isAdmin) {
                   return Column(
@@ -450,22 +451,20 @@ class HomeContent extends StatelessWidget {
                       ),
                       const SizedBox(height: 16),
                       Card(
-                        color: const Color(0xFFFEF2F2), // red-50
+                        color: const Color(0xFFFEF2F2),
                         child: InkWell(
-                          onTap: () {
-                            Navigator.of(context).pushNamed('/admin/dashboard');
-                          },
+                          onTap: () => Navigator.pushNamed(context, '/admin/dashboard'),
                           child: const Padding(
                             padding: EdgeInsets.all(16.0),
                             child: Row(
                               children: [
                                 CircleAvatar(
                                   radius: 20,
-                                  backgroundColor: Color(0xFFFEE2E2), // red-100
+                                  backgroundColor: Color(0xFFFEE2E2),
                                   child: Icon(
                                     Icons.admin_panel_settings,
                                     size: 20,
-                                    color: Color(0xFFDC2626), // red-600
+                                    color: Color(0xFFDC2626),
                                   ),
                                 ),
                                 SizedBox(width: 12),
@@ -484,7 +483,7 @@ class HomeContent extends StatelessWidget {
                                         'Manage serials and users',
                                         style: TextStyle(
                                           fontSize: 14,
-                                          color: Color(0xFF6B7280), // gray-500
+                                          color: Color(0xFF6B7280),
                                         ),
                                       ),
                                     ],
@@ -528,11 +527,7 @@ class HomeContent extends StatelessWidget {
               CircleAvatar(
                 radius: 20,
                 backgroundColor: bgColor,
-                child: Icon(
-                  icon,
-                  size: 20,
-                  color: iconColor,
-                ),
+                child: Icon(icon, size: 20, color: iconColor),
               ),
               const SizedBox(height: 8),
               Text(
@@ -547,7 +542,7 @@ class HomeContent extends StatelessWidget {
                 subtitle,
                 style: const TextStyle(
                   fontSize: 12,
-                  color: Color(0xFF6B7280), // gray-500
+                  color: Color(0xFF6B7280),
                 ),
               ),
             ],

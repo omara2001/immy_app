@@ -33,7 +33,9 @@ Immy App connects with the **Immy Brainy Bear** to log conversations and present
 ├── services/
 │   ├── api_service.dart
 │   ├── serial_service.dart
-│   └── auth_service.dart (doing later)
+│   └── auth_service.dart 
+|   └── users_auth_service.dart 
+|
 ├── screens/
 │   ├── home_page.dart
 │   ├── settings_page.dart
@@ -56,6 +58,12 @@ Immy App connects with the **Immy Brainy Bear** to log conversations and present
 - `settings_page.dart`
 - `terms_and_conditions_page.dart`
 - `terms_of_service_page.dart`
+- `login_screen.dart`
+- `register_screen.dart`
+- `admin_login_screen`
+- `admin_dashboard_screen`
+- `serial_management_screen`
+- `serial_lookup_screen`
 
 ### Custom Widgets
 - `subscription_banner.dart`
@@ -79,6 +87,17 @@ Immy App connects with the **Immy Brainy Bear** to log conversations and present
    flutter pub get
 3. Run the app
    flutter run
+
+### Authentication steps is handled by users_auth_service 
+  ##### steps to perform
+
+1. Download Xampp and open it and the sql server to start the server
+  
+
+2. open htdocs folder and create a new folder on it name it immy_app and copy the folder of the api in it
+
+3. open the Admin panal of the php my admin and create a new database name it immy_app and import the sql file  which named database.sql which found in the api folder and now you can use the api by using the url of the server which is (http://localhost/immy_app/api)
+
 
 📂 Assets
 - assets/immy_BrainyBear.png: Used within the UI to represent the Immy character.

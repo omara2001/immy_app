@@ -1,20 +1,24 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'screens/register_screen.dart';
 import 'screens/terms_of_service_page.dart';
 import 'screens/home_page.dart';
 import 'screens/serial_management_screen.dart';
 import 'screens/serial_lookup_screen.dart';
 import 'screens/admin_login_screen.dart';
 import 'screens/admin_dashboard_screen.dart';
+import 'screens/login_screen.dart'; // Import the missing LoginScreen
 import 'services/serial_service.dart';
 import 'services/api_service.dart';
-import 'services/auth_service.dart';
+import 'services/auth_service.dart' as auth_service;
+import 'services/users_auth_service.dart' as users_auth_service;
 
 void main() {
   // Initialize services
   final serialService = SerialService();
   final apiService = ApiService();
-  final authService = AuthService();
+  final authService = auth_service.AuthService();
+  final usersAuthService =users_auth_service.AuthService();
   
   runApp(MyApp(
     serialService: serialService,
@@ -26,7 +30,7 @@ void main() {
 class MyApp extends StatelessWidget {
   final SerialService serialService;
   final ApiService apiService;
-  final AuthService authService;
+  final auth_service.AuthService authService;
   
   const MyApp({
     super.key, 
@@ -63,6 +67,8 @@ class MyApp extends StatelessWidget {
       // Define named routes for easy navigation
       routes: {
         '/': (context) => const SplashScreen(),
+        '/login': (context) => const LoginScreen(),
+        '/register': (context) => const RegisterScreen(),
         '/home': (context) => HomePage(
               serialService: serialService,
               apiService: apiService,
@@ -96,29 +102,47 @@ class SplashScreen extends StatefulWidget {
 }
 
 class _SplashScreenState extends State<SplashScreen> {
+  final usersAuthService =users_auth_service.AuthService();
+  
   @override
   void initState() {
     super.initState();
-    _checkFirstTime();
+    _checkAuthStatus();
   }
 
-  Future<void> _checkFirstTime() async {
-    final prefs = await SharedPreferences.getInstance();
-    final bool termsAccepted = prefs.getBool('terms_accepted') ?? false;
-
-    if (!mounted) return;
-
+  Future<void> _checkAuthStatus() async {
     // Simulate a splash screen delay
     await Future.delayed(const Duration(seconds: 2));
-
+    
     if (!mounted) return;
-
-    if (termsAccepted) {
-      // User has already accepted terms, go directly to home page
-      Navigator.of(context).pushReplacementNamed('/home');
-    } else {
-      // First time user, show terms of service
-      Navigator.of(context).pushReplacementNamed('/terms');
+    
+    try {
+      // Check if user is logged in
+      final isLoggedIn = await usersAuthService.isLoggedIn();
+      
+      if (!mounted) return;
+      
+      if (isLoggedIn) {
+        // Check if terms are accepted
+        final prefs = await SharedPreferences.getInstance();
+        final bool termsAccepted = prefs.getBool('terms_accepted') ?? false;
+        
+        if (termsAccepted) {
+          // User has already accepted terms, go directly to home page
+          Navigator.of(context).pushReplacementNamed('/home');
+        } else {
+          // User is logged in but hasn't accepted terms
+          Navigator.of(context).pushReplacementNamed('/terms');
+        }
+      } else {
+        // User is not logged in, go to login page
+        Navigator.of(context).pushReplacementNamed('/login');
+      }
+    } catch (e) {
+      // If there's an error, default to login page
+      if (mounted) {
+        Navigator.of(context).pushReplacementNamed('/login');
+      }
     }
   }
 

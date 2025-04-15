@@ -9,6 +9,8 @@ import 'screens/admin_login_screen.dart';
 import 'screens/admin_dashboard_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/recent_conversations_screen.dart';
+import 'screens/qr_scanner_screen.dart';
+import 'screens/device_management_screen.dart';
 import 'services/serial_service.dart';
 import 'services/api_service.dart';
 import 'services/auth_service.dart' as auth_service;
@@ -92,6 +94,12 @@ class MyApp extends StatelessWidget {
         '/recent-conversations': (context) => RecentConversationsScreen(
               apiService: apiService,
               authService: authService,
+            ),
+        '/scan-qr-code': (context) => QrScannerScreen(
+              serialService: serialService,
+            ),
+        '/device-management': (context) => DeviceManagementScreen(
+              serialService: serialService,
             ),
       },
       initialRoute: '/',

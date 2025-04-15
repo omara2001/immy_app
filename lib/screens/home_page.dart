@@ -17,6 +17,8 @@ class HomePage extends StatefulWidget {
   final auth_service.AuthService? authService;
   final users_auth_service.AuthService? usersAuthService; // Use aliased type
 
+  // Removed duplicate and malformed constructor definition
+
   const HomePage({
     super.key, 
     required this.serialService,
@@ -137,8 +139,8 @@ class _HomePageState extends State<HomePage> {
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.qr_code, color: Colors.white),
-            onPressed: () => Navigator.pushNamed(context, '/serial-management'),
+            icon: const Icon(Icons.qr_code_scanner, color: Colors.white),
+            onPressed: () => Navigator.pushNamed(context, '/scan-qr-code'),
           ),
           if (_isAdmin)
             IconButton(
@@ -263,6 +265,22 @@ class _HomePageState extends State<HomePage> {
             onTap: () {
               Navigator.pop(context);
               Navigator.pushNamed(context, '/recent-conversations');
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.qr_code_scanner),
+            title: const Text('Scan QR Code'),
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.pushNamed(context, '/scan-qr-code');
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.devices),
+            title: const Text('My Teddy Bears'),
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.pushNamed(context, '/device-management');
             },
           ),
           ListTile(
@@ -434,12 +452,12 @@ class HomeContent extends StatelessWidget {
                 ),
                 _buildQuickActionCard(
                   context,
-                  Icons.qr_code,
+                  Icons.qr_code_scanner,
                   'Manage Devices',
                   'Link a new Immy bear',
                   const Color(0xFFEDE9FE),
                   const Color(0xFF8B5CF6),
-                  onTap: () => Navigator.pushNamed(context, '/serial-management'),
+                  onTap: () => Navigator.pushNamed(context, '/device-management'),
                 ),
               ],
             ),

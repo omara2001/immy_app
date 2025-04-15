@@ -19,6 +19,7 @@ dependencies:
   uuid: ^3.0.7
   path_provider: ^2.1.0
   crypto: ^3.0.3  # Added this line for password hashing
+  mobile_scanner: ^3.5.5  # Added for QR code scanning
 
 dev_dependencies:
   flutter_test:

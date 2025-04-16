@@ -1,73 +1,62 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'screens/register_screen.dart';
+import 'services/serial_service.dart';
+import 'services/api_service.dart';
+import 'services/auth_service.dart' as admin_auth;
+import 'services/users_auth_service.dart' as user_auth;
 import 'screens/terms_of_service_page.dart';
 import 'screens/home_page.dart';
 import 'screens/serial_management_screen.dart';
 import 'screens/serial_lookup_screen.dart';
-import 'screens/admin_login_screen.dart';
-import 'screens/admin_dashboard_screen.dart';
-import 'screens/login_screen.dart';
 import 'screens/recent_conversations_screen.dart';
 import 'screens/qr_scanner_screen.dart';
 import 'screens/device_management_screen.dart';
-import 'services/serial_service.dart';
-import 'services/api_service.dart';
-import 'services/auth_service.dart' as auth_service;
-import 'services/users_auth_service.dart' as users_auth_service;
+import 'screens/admin_login_screen.dart';
+import 'screens/admin_dashboard_screen.dart';
+import 'screens/admin_setup_screen.dart';
+import 'screens/login_screen.dart';
+import 'screens/register_screen.dart';
 
-void main() {
+void main() async {
+  // Ensure Flutter is initialized
+  WidgetsFlutterBinding.ensureInitialized();
+  
   // Initialize services
-  final serialService = SerialService();
-  final apiService = ApiService();
-  final authService = auth_service.AuthService();
-  final usersAuthService = users_auth_service.AuthService();
+  final adminAuthService = admin_auth.AuthService();
+  final userAuthService = user_auth.AuthService();
+  
+  // Initialize admin users
+  await adminAuthService.initializeAdminUser();
+  await userAuthService.initializeAdminUser();
   
   runApp(MyApp(
-    serialService: serialService,
-    apiService: apiService,
-    authService: authService,
+    adminAuthService: adminAuthService,
+    userAuthService: userAuthService, serialService: null, apiService: null,
   ));
 }
 
 class MyApp extends StatelessWidget {
-  final SerialService serialService;
-  final ApiService apiService;
-  final auth_service.AuthService authService;
+  final admin_auth.AuthService adminAuthService;
+  final user_auth.AuthService userAuthService;
   
   const MyApp({
-    super.key, 
-    required this.serialService,
-    required this.apiService,
-    required this.authService,
+    super.key,
+    required this.adminAuthService,
+    required this.userAuthService, required serialService, required apiService,
   });
 
   @override
   Widget build(BuildContext context) {
+    // Initialize services
+    final serialService = SerialService();
+    final apiService = ApiService();
+
     return MaterialApp(
       title: 'Immy App',
       theme: ThemeData(
         primarySwatch: Colors.purple,
-        primaryColor: const Color(0xFF8B5CF6), // purple-600
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF8B5CF6),
-          primary: const Color(0xFF8B5CF6),
-        ),
-        scaffoldBackgroundColor: const Color(0xFFF9FAFB), // gray-50
-        appBarTheme: const AppBarTheme(
-          backgroundColor: Color(0xFF8B5CF6), // purple-600
-          foregroundColor: Colors.white,
-        ),
-        cardTheme: CardTheme(
-          elevation: 0,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
-            side: const BorderSide(color: Color(0xFFE5E7EB)), // gray-200
-          ),
-        ),
-        useMaterial3: true,
+        visualDensity: VisualDensity.adaptivePlatformDensity,
       ),
-      // Define named routes for easy navigation
       routes: {
         '/': (context) => const SplashScreen(),
         '/login': (context) => const LoginScreen(),
@@ -75,7 +64,8 @@ class MyApp extends StatelessWidget {
         '/home': (context) => HomePage(
               serialService: serialService,
               apiService: apiService,
-              authService: authService,
+              authService: adminAuthService,
+              usersAuthService: userAuthService,
             ),
         '/terms': (context) => const TermsOfServicePage(),
         '/serial-management': (context) => SerialManagementScreen(
@@ -85,15 +75,18 @@ class MyApp extends StatelessWidget {
               serialService: serialService,
             ),
         '/admin/login': (context) => AdminLoginScreen(
-              authService: authService,
+              authService: adminAuthService,
             ),
         '/admin/dashboard': (context) => AdminDashboardScreen(
               serialService: serialService,
-              authService: authService,
+              authService: adminAuthService,
             ),
-        '/recent-conversations': (context) => RecentConversationsScreen(
+        '/admin-setup': (context) => AdminSetupScreen(
+              authService: adminAuthService,
+            ),
+            '/recent-conversations': (context) => RecentConversationsScreen(
               apiService: apiService,
-              authService: authService,
+              usersAuthService: userAuthService,
             ),
         '/scan-qr-code': (context) => QrScannerScreen(
               serialService: serialService,
@@ -112,12 +105,10 @@ class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
 
   @override
-  State<SplashScreen> createState() => _SplashScreenState();
+  _SplashScreenState createState() => _SplashScreenState();
 }
 
 class _SplashScreenState extends State<SplashScreen> {
-  final usersAuthService = users_auth_service.AuthService();
-  
   @override
   void initState() {
     super.initState();
@@ -127,34 +118,33 @@ class _SplashScreenState extends State<SplashScreen> {
   Future<void> _checkAuthStatus() async {
     // Simulate a splash screen delay
     await Future.delayed(const Duration(seconds: 2));
-    
+
     if (!mounted) return;
-    
-    try {
-      // Check if user is logged in
-      final isLoggedIn = await usersAuthService.isLoggedIn();
+
+    final userAuth = user_auth.AuthService();
+    final isLoggedIn = await userAuth.isLoggedIn();
+
+    if (isLoggedIn) {
+      // Check if user is admin
+      final isAdmin = await userAuth.isCurrentUserAdmin();
       
-      if (!mounted) return;
-      
-      if (isLoggedIn) {
-        // Check if terms are accepted
-        final prefs = await SharedPreferences.getInstance();
-        final bool termsAccepted = prefs.getBool('terms_accepted') ?? false;
-        
-        if (termsAccepted) {
-          // User has already accepted terms, go directly to home page
-          Navigator.of(context).pushReplacementNamed('/home');
-        } else {
-          // User is logged in but hasn't accepted terms
-          Navigator.of(context).pushReplacementNamed('/terms');
-        }
+      if (isAdmin) {
+        // If admin, go to admin dashboard
+        Navigator.of(context).pushReplacementNamed('/admin/dashboard');
       } else {
-        // User is not logged in, go to login page
-        Navigator.of(context).pushReplacementNamed('/login');
+        // If regular user, go to home
+        Navigator.of(context).pushReplacementNamed('/home');
       }
-    } catch (e) {
-      // If there's an error, default to login page
-      if (mounted) {
+    } else {
+      // Not logged in, check if terms accepted
+      final prefs = await SharedPreferences.getInstance();
+      final bool termsAccepted = prefs.getBool('terms_accepted') ?? false;
+
+      if (!termsAccepted) {
+        // First time user, show terms of service
+        Navigator.of(context).pushReplacementNamed('/terms');
+      } else {
+        // Terms accepted but not logged in, go to login
         Navigator.of(context).pushReplacementNamed('/login');
       }
     }
@@ -162,24 +152,24 @@ class _SplashScreenState extends State<SplashScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Theme.of(context).primaryColor,
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Image.asset(
-              'assets/immy_BrainyBear.png',
-              width: 150,
-              height: 150,
-            ),
-            const SizedBox(height: 24),
-            const CircularProgressIndicator(
-              valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-            ),
-          ],
-        ),
+  return Scaffold(
+    backgroundColor: const Color(0xFF8B5CF6), // purple-600 (same as first widget)
+    body: Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Image.asset(
+            'assets/immy_BrainyBear.png',
+            width: 150,
+            height: 150,
+          ),
+          const SizedBox(height: 24),
+          const CircularProgressIndicator(
+            valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+          ),
+        ],
       ),
-    );
+    ),
+  );
   }
 }

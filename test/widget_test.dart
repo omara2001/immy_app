@@ -17,7 +17,7 @@ void main() {
     final mockSerialService = MockSerialService();
     final mockApiService = MockApiService();
 
-    await tester.pumpWidget(MyApp(authService: mockAuthService, serialService: mockSerialService, apiService: mockApiService));
+    await tester.pumpWidget(MyApp(userAuthService: mockAuthService, serialService: mockSerialService, apiService: mockApiService, adminAuthService: mockAuthService,));
 
     // Verify that our counter starts at 0.
     expect(find.text('0'), findsOneWidget);

@@ -71,9 +71,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
-        iconTheme: const IconThemeData(
-          color: Color(0xFF8B5CF6), // purple-600
-        ),
+        iconTheme: const IconThemeData(color: Color(0xFF8B5CF6)),
       ),
       body: SafeArea(
         child: Center(
@@ -211,7 +209,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       ),
                       const SizedBox(height: 16),
                       
-                      // Confirm password field
+                      // Confirm Password field
                       TextFormField(
                         controller: _confirmPasswordController,
                         obscureText: _obscureConfirmPassword,
@@ -287,7 +285,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           ),
                           TextButton(
                             onPressed: () {
-                              Navigator.pop(context);
+                              Navigator.pushReplacementNamed(context, '/login');
                             },
                             child: const Text('Sign In'),
                           ),

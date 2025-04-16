@@ -1,15 +1,7 @@
 import 'package:flutter/material.dart';
 import '../widgets/subscription_banner.dart';
-import '../widgets/serial_info_card.dart';
-import '../services/serial_service.dart';
-
 class SettingsPage extends StatefulWidget {
-  final SerialService serialService;
-
-  const SettingsPage({
-    super.key,
-    required this.serialService,
-  });
+  const SettingsPage({super.key});
 
   @override
   State<SettingsPage> createState() => _SettingsPageState();
@@ -30,32 +22,6 @@ class _SettingsPageState extends State<SettingsPage> {
           children: [
             const SubscriptionBanner(isActive: true),
             const SizedBox(height: 24),
-            
-            // Device Information Section
-            const Text(
-              'Device Information',
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 18,
-              ),
-            ),
-            const Text(
-              'Manage your Immy Bear device',
-              style: TextStyle(
-                fontSize: 14,
-                color: Color(0xFF6B7280), // gray-500
-              ),
-            ),
-            const SizedBox(height: 16),
-            
-            // Serial Number Card
-            SerialInfoCard(
-              userEmail: _userEmail,
-              serialService: widget.serialService,
-            ),
-            
-            const SizedBox(height: 24),
-            
             // Learning Settings Section
             const Text(
               'Learning Settings',

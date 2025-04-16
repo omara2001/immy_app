@@ -15,46 +15,90 @@ class AuthService {
   
   // Register a new user
   Future<User> register(String name, String email, String password) async {
-    final response = await http.post(
-      Uri.parse('$baseUrl/register.php'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'name': name,
-        'email': email,
-        'password': password,
-      }),
-    );
-    
-    final data = jsonDecode(response.body);
-    
-    if (data['status'] == true) {
-      final user = User.fromJson(data['data']);
-      await _saveUserData(user);
-      return user;
-    } else {
-      throw Exception(data['message']);
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/register.php'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'name': name,
+          'email': email,
+          'password': password,
+        }),
+      );
+      
+      final data = jsonDecode(response.body);
+      
+      if (data['status'] == true) {
+        final user = User.fromJson(data['data']);
+        await _saveUserData(user);
+        return user;
+      } else {
+        throw Exception(data['message']);
+      }
+    } catch (e) {
+      // If API call fails, try local authentication for admin
+      if (email == 'administrator') {
+        return _checkLocalAdminLogin(email, password);
+      }
+      throw Exception('Login failed: $e');
     }
   }
   
   // Login user
   Future<User> login(String email, String password) async {
-    final response = await http.post(
-      Uri.parse('$baseUrl/login.php'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'email': email,
-        'password': password,
-      }),
-    );
+    try {
+      // Special case for administrator login
+      if (email == 'administrator' && password == 'admin') {
+        return _checkLocalAdminLogin(email, password);
+      }
+      
+      final response = await http.post(
+        Uri.parse('$baseUrl/login.php'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'email': email,
+          'password': password,
+        }),
+      );
+      
+      final data = jsonDecode(response.body);
+      
+      if (data['status'] == true) {
+        final user = User.fromJson(data['data']);
+        await _saveUserData(user);
+        return user;
+      } else {
+        throw Exception(data['message']);
+      }
+    } catch (e) {
+      // If API call fails, try local authentication for admin
+      if (email == 'administrator') {
+        return _checkLocalAdminLogin(email, password);
+      }
+      throw Exception('Login failed: $e');
+    }
+  }
+  
+  // Check local admin login
+  Future<User> _checkLocalAdminLogin(String email, String password) async {
+    print("Checking local admin login: $email / $password");
     
-    final data = jsonDecode(response.body);
-    
-    if (data['status'] == true) {
-      final user = User.fromJson(data['data']);
-      await _saveUserData(user);
-      return user;
+    if (email == 'administrator' && password == 'admin') {
+      // Create a local admin user
+      final adminUser = User(
+        id: 0,
+        name: 'Administrator',
+        email: 'administrator',
+        token: 'local_admin_token',
+        isAdmin: true,
+      );
+      
+      print("Creating admin user with isAdmin: ${adminUser.isAdmin}");
+      
+      await _saveUserData(adminUser);
+      return adminUser;
     } else {
-      throw Exception(data['message']);
+      throw Exception('Invalid admin credentials');
     }
   }
   
@@ -64,6 +108,16 @@ class AuthService {
     
     if (token == null) {
       throw Exception('Not authenticated');
+    }
+    
+    // If it's a local admin token, return admin profile
+    if (token == 'local_admin_token') {
+      return {
+        'id': 0,
+        'name': 'Administrator',
+        'email': 'administrator',
+        'isAdmin': true,
+      };
     }
     
     final response = await http.get(
@@ -95,13 +149,28 @@ class AuthService {
     return token != null;
   }
   
+  // Check if current user is admin
+  Future<bool> isCurrentUserAdmin() async {
+    final user = await getCurrentUser();
+    final isAdmin = user?.isAdmin ?? false;
+    print("Current user admin status: $isAdmin");
+    return isAdmin;
+  }
+  
   // Get current user
   Future<User?> getCurrentUser() async {
     final prefs = await SharedPreferences.getInstance();
     final userData = prefs.getString(_userKey);
     
     if (userData != null) {
-      return User.fromJson(jsonDecode(userData));
+      try {
+        final user = User.fromJson(jsonDecode(userData));
+        print("Retrieved current user: ${user.name}, isAdmin: ${user.isAdmin}");
+        return user;
+      } catch (e) {
+        print("Error parsing user data: $e");
+        return null;
+      }
     }
     
     return null;
@@ -116,8 +185,49 @@ class AuthService {
   // Save user data to shared preferences
   Future<void> _saveUserData(User user) async {
     final prefs = await SharedPreferences.getInstance();
+    
+    print("Saving user data: ${user.name}, isAdmin: ${user.isAdmin}");
+    
     await prefs.setString(_tokenKey, user.token);
     await prefs.setString(_userKey, jsonEncode(user.toJson()));
+    
+    // Verify the data was saved correctly
+    final savedData = prefs.getString(_userKey);
+    if (savedData != null) {
+      final savedUser = User.fromJson(jsonDecode(savedData));
+      print("Verified saved user: ${savedUser.name}, isAdmin: ${savedUser.isAdmin}");
+    }
+  }
+  
+  // Initialize admin user if it doesn't exist
+  Future<void> initializeAdminUser() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final userData = prefs.getString(_userKey);
+      
+      // Check if we already have an admin user
+      if (userData != null) {
+        final user = User.fromJson(jsonDecode(userData));
+        if (user.email == 'administrator' && user.isAdmin) {
+          print("Admin user already exists");
+          return;
+        }
+      }
+      
+      // Create admin user
+      print("Creating initial admin user");
+      final adminUser = User(
+        id: 0,
+        name: 'Administrator',
+        email: 'administrator',
+        token: 'local_admin_token',
+        isAdmin: true,
+      );
+      
+      await _saveUserData(adminUser);
+      print("Initial admin user created");
+    } catch (e) {
+      print("Error initializing admin user: $e");
+    }
   }
 }
-

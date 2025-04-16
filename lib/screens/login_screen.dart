@@ -36,16 +36,28 @@ class _LoginScreenState extends State<LoginScreen> {
     });
     
     try {
-      await _authService.login(
-        _emailController.text.trim(),
-        _passwordController.text,
-      );
+      final email = _emailController.text.trim();
+      final password = _passwordController.text;
+      
+      print("Login attempt: $email / $password");
+      
+      final user = await _authService.login(email, password);
+      
+      print("Logged in user: ${user.name}, isAdmin: ${user.isAdmin}");
       
       if (mounted) {
-        // Navigate to home page and remove all previous routes
-        Navigator.of(context).pushReplacementNamed('/home');
+        // If admin, navigate to admin dashboard
+        if (user.isAdmin) {
+          print("Navigating to admin dashboard");
+          Navigator.of(context).pushReplacementNamed('/admin/dashboard');
+        } else {
+          // Otherwise, navigate to home page
+          print("Navigating to home page");
+          Navigator.of(context).pushReplacementNamed('/home');
+        }
       }
     } catch (e) {
+      print("Login error: $e");
       setState(() {
         _errorMessage = e.toString();
       });
@@ -134,16 +146,14 @@ class _LoginScreenState extends State<LoginScreen> {
                         controller: _emailController,
                         keyboardType: TextInputType.emailAddress,
                         decoration: const InputDecoration(
-                          labelText: 'Email',
+                          labelText: 'Email or Username',
                           border: OutlineInputBorder(),
                           prefixIcon: Icon(Icons.email),
+                          hintText: 'Enter email or "administrator" for admin',
                         ),
                         validator: (value) {
                           if (value == null || value.isEmpty) {
-                            return 'Please enter your email';
-                          }
-                          if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(value)) {
-                            return 'Please enter a valid email';
+                            return 'Please enter your email or username';
                           }
                           return null;
                         },
@@ -158,6 +168,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           labelText: 'Password',
                           border: const OutlineInputBorder(),
                           prefixIcon: const Icon(Icons.lock),
+                          hintText: 'Enter password or "admin" for admin',
                           suffixIcon: IconButton(
                             icon: Icon(
                               _obscurePassword ? Icons.visibility : Icons.visibility_off,

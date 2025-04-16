@@ -279,7 +279,7 @@ class _HomePageState extends State<HomePage> {
                 ),
               ],
             ),
-          ),
+            ),
           ListTile(
             leading: const Icon(Icons.home),
             title: const Text('Home'),
@@ -584,4 +584,3 @@ class HomeContent extends StatelessWidget {
     );
   }
 }
-

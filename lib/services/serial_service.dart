@@ -12,22 +12,31 @@ import 'package:uuid/uuid.dart';
 import '../models/user_profile.dart';
 import '../models/serial_number.dart';
 import '../services/auth_service.dart';
+import '../services/users_auth_service.dart' as user_auth;
 import '../utils/password_util.dart'; // Make sure this path is correct
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/rendering.dart';
 
 // Conditional imports
+import 'dart:io' if (kIsWeb) 'dart:html' as html;
 
 class SerialService {
   static const String _userProfilesKey = 'user_profiles';
   static const String _serialNumbersKey = 'serial_numbers';
   final Uuid _uuid = const Uuid();
   final AuthService _authService = AuthService();
+  final user_auth.AuthService _userAuthService = user_auth.AuthService();
   
   // Check if the current user is an admin before performing admin-only operations
   Future<void> _checkAdminAccess() async {
-    final isAdmin = await _authService.isCurrentUserAdmin();
-    if (!isAdmin) {
+    // First check user auth service
+    final isUserAdmin = await _userAuthService.isCurrentUserAdmin();
+    
+    // Then check admin auth service
+    final isAdminServiceAdmin = await _authService.isCurrentUserAdmin();
+    
+    // If either returns true, allow access
+    if (!isUserAdmin && !isAdminServiceAdmin) {
       throw Exception('Access denied: Admin privileges required');
     }
   }
@@ -39,6 +48,7 @@ class SerialService {
       await _checkAdminAccess();
     } catch (e) {
       // Ignore the error for initial setup
+      print("Ignoring admin check for initial setup: $e");
     }
     
     final prefs = await SharedPreferences.getInstance();
@@ -86,6 +96,40 @@ class SerialService {
     
       // Save serials
       await prefs.setString(_serialNumbersKey, jsonEncode(serials.map((s) => s.toJson()).toList()));
+      
+      // Also sync the admin user with the user auth service
+      await _syncAdminUser();
+    }
+  }
+  
+  // Sync admin user between auth services
+  Future<void> _syncAdminUser() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final profilesJson = prefs.getString(_userProfilesKey);
+      
+      if (profilesJson != null) {
+        final List<dynamic> decoded = jsonDecode(profilesJson);
+        final profiles = decoded.map((json) => UserProfile.fromJson(json)).toList();
+        
+        // Find admin user
+        final adminUser = profiles.firstWhere(
+          (profile) => profile.email == 'administrator' && profile.isAdmin,
+          orElse: () => UserProfile(
+            id: _uuid.v4(),
+            name: 'Administrator',
+            email: 'administrator',
+            isAdmin: true,
+            passwordHash: PasswordUtil.hashPassword('admin'),
+          ),
+        );
+        
+        // Create admin user in user auth service
+        await _userAuthService.login('administrator', 'admin');
+        print("Synced admin user with user auth service");
+      }
+    } catch (e) {
+      print("Error syncing admin user: $e");
     }
   }
   

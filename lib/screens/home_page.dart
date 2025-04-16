@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:immy_app/models/user.dart';
+import '../models/user.dart';
 import '../widgets/subscription_banner.dart';
 import '../services/serial_service.dart';
 import '../services/api_service.dart';
-import '../services/auth_service.dart' as auth_service;
-import '../services/users_auth_service.dart' as users_auth_service;
+import '../services/auth_service.dart' as admin_auth;
+import '../services/users_auth_service.dart' as user_auth;
 import 'insights_page.dart';
 import 'coach_page.dart';
 import 'payments_page.dart';
@@ -13,8 +13,8 @@ import 'settings_page.dart';
 class HomePage extends StatefulWidget {
   final SerialService serialService;
   final ApiService apiService;
-  final auth_service.AuthService? authService;
-  final users_auth_service.AuthService? usersAuthService; // Use aliased type
+  final admin_auth.AuthService? authService;
+  final user_auth.AuthService? usersAuthService;
 
   const HomePage({
     super.key, 
@@ -47,54 +47,77 @@ class _HomePageState extends State<HomePage> {
       SettingsPage(serialService: widget.serialService),
     ];
     
-    _initSampleData();
     _checkAdminStatus();
     _loadUserData();
   }
 
-   Future<void> _loadUserData() async {
-    if (widget.authService == null) return;
-    
+  Future<void> _loadUserData() async {
     setState(() => _isLoading = true);
+    
     try {
-      final user = await widget.authService!.getCurrentUser();
-      if (mounted && user != null) {
-        setState(() {
-          _userName = user.name; // Ensure user object has 'name' property
-          _isLoading = false;
-        });
+      // Try to get user from users auth service first
+      if (widget.usersAuthService != null) {
+        final user = await widget.usersAuthService!.getCurrentUser();
+        if (user != null) {
+          setState(() {
+            _userName = user.name;
+            _isAdmin = user.isAdmin;
+            _isLoading = false;
+          });
+          return;
+        }
+      }
+      
+      // Fall back to admin auth service
+      if (widget.authService != null) {
+        final user = await widget.authService!.getCurrentUser();
+        if (mounted && user != null) {
+          setState(() {
+            _userName = user.name;
+            _isLoading = false;
+          });
+        }
       }
     } catch (e) {
       print('Error loading user: $e');
+    } finally {
       if (mounted) {
         setState(() {
           _isLoading = false;
-          _userName = 'Error loading name';
         });
       }
-    }
-  }
-
-  Future<void> _initSampleData() async {
-    try {
-      await widget.serialService.initWithSampleData();
-    } catch (e) {
-      print('Note: Sample data initialization restricted: $e');
     }
   }
 
   Future<void> _checkAdminStatus() async {
-    if (widget.authService != null) {
-      final isAdmin = await widget.authService!.isCurrentUserAdmin();
-      if (mounted) {
-        setState(() => _isAdmin = isAdmin);
+    try {
+      // Try users auth service first
+      if (widget.usersAuthService != null) {
+        final isAdmin = await widget.usersAuthService!.isCurrentUserAdmin();
+        if (mounted) {
+          setState(() => _isAdmin = isAdmin);
+        }
+        return;
       }
+      
+      // Fall back to admin auth service
+      if (widget.authService != null) {
+        final isAdmin = await widget.authService!.isCurrentUserAdmin();
+        if (mounted) {
+          setState(() => _isAdmin = isAdmin);
+        }
+      }
+    } catch (e) {
+      print('Error checking admin status: $e');
     }
   }
 
   Future<void> _logout() async {
     try {
+      // Logout from both services
+      await widget.usersAuthService?.logout();
       await widget.authService?.logout();
+      
       if (mounted) {
         Navigator.of(context).pushReplacementNamed('/login');
       }
@@ -135,10 +158,13 @@ class _HomePageState extends State<HomePage> {
           ],
         ),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.qr_code, color: Colors.white),
-            onPressed: () => Navigator.pushNamed(context, '/serial-management'),
-          ),
+          // Only show serial management for admins
+          if (_isAdmin)
+            IconButton(
+              icon: const Icon(Icons.qr_code, color: Colors.white),
+              onPressed: () => Navigator.pushNamed(context, '/serial-management'),
+            ),
+          // Only show admin dashboard for admins
           if (_isAdmin)
             IconButton(
               icon: const Icon(Icons.admin_panel_settings, color: Colors.white),
@@ -153,7 +179,7 @@ class _HomePageState extends State<HomePage> {
             icon: const Icon(Icons.menu, color: Colors.white),
             onSelected: (value) {
               if (value == 'logout') _logout();
-              if (value == 'settings') _selectedIndex = 4;
+              if (value == 'settings') setState(() => _selectedIndex = 4);
             },
             itemBuilder: (context) => [
               PopupMenuItem(
@@ -256,17 +282,21 @@ class _HomePageState extends State<HomePage> {
             title: const Text('Home'),
             onTap: () => _updateIndex(0),
           ),
-          ListTile(
-            leading: const Icon(Icons.qr_code),
-            title: const Text('Serial Management'),
-            onTap: () => Navigator.pushNamed(context, '/serial-management'),
-          ),
-          ListTile(
-            leading: const Icon(Icons.search),
-            title: const Text('Serial Lookup'),
-            onTap: () => Navigator.pushNamed(context, '/serial-lookup'),
-          ),
-          if (widget.authService != null) ...[
+          // Only show serial management for admins
+          if (_isAdmin) ...[
+            ListTile(
+              leading: const Icon(Icons.qr_code),
+              title: const Text('Serial Management'),
+              onTap: () => Navigator.pushNamed(context, '/serial-management'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.search),
+              title: const Text('Serial Lookup'),
+              onTap: () => Navigator.pushNamed(context, '/serial-lookup'),
+            ),
+          ],
+          // Admin section
+          if (_isAdmin) ...[
             const Divider(),
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -278,17 +308,11 @@ class _HomePageState extends State<HomePage> {
                 ),
               ),
             ),
-            _isAdmin
-              ? ListTile(
-                  leading: const Icon(Icons.admin_panel_settings),
-                  title: const Text('Admin Dashboard'),
-                  onTap: () => Navigator.pushNamed(context, '/admin/dashboard'),
-                )
-              : ListTile(
-                  leading: const Icon(Icons.login),
-                  title: const Text('Admin Login'),
-                  onTap: () => Navigator.pushNamed(context, '/admin/login'),
-                ),
+            ListTile(
+              leading: const Icon(Icons.admin_panel_settings),
+              title: const Text('Admin Dashboard'),
+              onTap: () => Navigator.pushNamed(context, '/admin/dashboard'),
+            ),
           ],
           const Divider(),
           ListTile(
@@ -312,6 +336,10 @@ class HomeContent extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Get access to the parent state to check admin status
+    final homePageState = context.findAncestorStateOfType<_HomePageState>();
+    final isAdmin = homePageState?._isAdmin ?? false;
+    
     return SingleChildScrollView(
       child: Padding(
         padding: const EdgeInsets.all(16.0),
@@ -405,7 +433,6 @@ class HomeContent extends StatelessWidget {
                   'View what Emma has been learning',
                   const Color(0xFFE0E7FF),
                   const Color(0xFF4F46E5),
-                  onTap: () => Navigator.pushNamed(context, '/serial-lookup'),
                 ),
                 _buildQuickActionCard(
                   context,
@@ -423,84 +450,76 @@ class HomeContent extends StatelessWidget {
                   const Color(0xFFFEF3C7),
                   const Color(0xFFD97706),
                 ),
-                _buildQuickActionCard(
-                  context,
-                  Icons.qr_code,
-                  'Manage Devices',
-                  'Link a new Immy bear',
-                  const Color(0xFFEDE9FE),
-                  const Color(0xFF8B5CF6),
-                  onTap: () => Navigator.pushNamed(context, '/serial-management'),
-                ),
+                // Only show device management for admins
+                if (isAdmin)
+                  _buildQuickActionCard(
+                    context,
+                    Icons.qr_code,
+                    'Manage Devices',
+                    'Link a new Immy bear',
+                    const Color(0xFFEDE9FE),
+                    const Color(0xFF8B5CF6),
+                    onTap: () => Navigator.pushNamed(context, '/serial-management'),
+                  ),
               ],
             ),
-            Builder(
-              builder: (context) {
-                final homePageState = context.findAncestorStateOfType<_HomePageState>();
-                if (homePageState != null && homePageState._isAdmin) {
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const SizedBox(height: 24),
-                      const Text(
-                        'Administration',
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 18,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      Card(
-                        color: const Color(0xFFFEF2F2),
-                        child: InkWell(
-                          onTap: () => Navigator.pushNamed(context, '/admin/dashboard'),
-                          child: const Padding(
-                            padding: EdgeInsets.all(16.0),
-                            child: Row(
-                              children: [
-                                CircleAvatar(
-                                  radius: 20,
-                                  backgroundColor: Color(0xFFFEE2E2),
-                                  child: Icon(
-                                    Icons.admin_panel_settings,
-                                    size: 20,
-                                    color: Color(0xFFDC2626),
-                                  ),
-                                ),
-                                SizedBox(width: 12),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        'Admin Dashboard',
-                                        style: TextStyle(
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 16,
-                                        ),
-                                      ),
-                                      Text(
-                                        'Manage serials and users',
-                                        style: TextStyle(
-                                          fontSize: 14,
-                                          color: Color(0xFF6B7280),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                Icon(Icons.arrow_forward_ios, size: 16),
-                              ],
-                            ),
+            // Admin section
+            if (isAdmin) ...[
+              const SizedBox(height: 24),
+              const Text(
+                'Administration',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 18,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Card(
+                color: const Color(0xFFFEF2F2),
+                child: InkWell(
+                  onTap: () => Navigator.pushNamed(context, '/admin/dashboard'),
+                  child: const Padding(
+                    padding: EdgeInsets.all(16.0),
+                    child: Row(
+                      children: [
+                        CircleAvatar(
+                          radius: 20,
+                          backgroundColor: Color(0xFFFEE2E2),
+                          child: Icon(
+                            Icons.admin_panel_settings,
+                            size: 20,
+                            color: Color(0xFFDC2626),
                           ),
                         ),
-                      ),
-                    ],
-                  );
-                }
-                return const SizedBox.shrink();
-              },
-            ),
+                        SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Admin Dashboard',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 16,
+                                ),
+                              ),
+                              Text(
+                                'Manage serials and users',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: Color(0xFF6B7280),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Icon(Icons.arrow_forward_ios, size: 16),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ],
         ),
       ),

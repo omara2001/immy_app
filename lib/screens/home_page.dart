@@ -9,6 +9,7 @@ import 'insights_page.dart';
 import 'coach_page.dart';
 import 'payments_page.dart';
 import 'settings_page.dart';
+import 'recent_conversations_screen.dart';
 
 class HomePage extends StatefulWidget {
   final SerialService serialService;
@@ -571,3 +572,4 @@ class HomeContent extends StatelessWidget {
     );
   }
 }
+

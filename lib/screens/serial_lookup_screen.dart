@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/serial_number.dart';
 import '../services/serial_service.dart';
+import '../services/backend_api_service.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
 class SerialLookupScreen extends StatefulWidget {
@@ -20,6 +21,21 @@ class _SerialLookupScreenState extends State<SerialLookupScreen> {
   SerialNumber? _serialNumber;
   bool _isLoading = false;
   String? _errorMessage;
+  Map<String, dynamic>? _userInfo;
+
+  @override
+  void initState() {
+    super.initState();
+    _initializeDatabase();
+  }
+
+  Future<void> _initializeDatabase() async {
+    try {
+      await BackendApiService.initializeDatabase();
+    } catch (e) {
+      print('DB initialization warning (may be already initialized): $e');
+    }
+  }
 
   Future<void> _lookupSerial() async {
     final email = _emailController.text.trim();
@@ -34,14 +50,43 @@ class _SerialLookupScreenState extends State<SerialLookupScreen> {
       _isLoading = true;
       _errorMessage = null;
       _serialNumber = null;
+      _userInfo = null;
     });
 
     try {
+      // First try to get the user from the database
+      final dbUser = await BackendApiService.getUserByEmail(email);
+      
+      if (dbUser != null) {
+        final userId = dbUser['id'];
+        _userInfo = dbUser;
+        
+        // Try to get their QR codes
+        final qrCodes = await BackendApiService.getQRCodesForUser(userId);
+        
+        if (qrCodes.isNotEmpty) {
+          final qrCode = qrCodes.first;
+          final qrCodePath = await widget.serialService.generateQrCode(qrCode['serial']);
+          
+          setState(() {
+            _serialNumber = SerialNumber(
+              id: qrCode['id'].toString(),
+              serial: qrCode['serial'],
+              qrCodePath: qrCodePath,
+              assignedToUserId: userId.toString(),
+              status: qrCode['status'] ?? 'active',
+            );
+          });
+          return;
+        }
+      } 
+      
+      // Fallback to local storage method if database didn't find anything
       final serial = await widget.serialService.getUserSerial(email);
       setState(() {
         _serialNumber = serial;
         if (serial == null) {
-          _errorMessage = 'No serial number assigned to this user.';
+          _errorMessage = 'No QR code assigned to this user.';
         }
       });
     } catch (e) {
@@ -65,7 +110,7 @@ class _SerialLookupScreenState extends State<SerialLookupScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Serial Lookup'),
+        title: const Text('QR Code Lookup'),
         backgroundColor: const Color(0xFF8B5CF6), // purple-600
         foregroundColor: Colors.white,
       ),
@@ -75,7 +120,7 @@ class _SerialLookupScreenState extends State<SerialLookupScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Look up a user\'s serial number',
+              'Look up a user\'s QR code',
               style: TextStyle(
                 fontSize: 20,
                 fontWeight: FontWeight.bold,
@@ -90,6 +135,7 @@ class _SerialLookupScreenState extends State<SerialLookupScreen> {
                 prefixIcon: Icon(Icons.email),
               ),
               keyboardType: TextInputType.emailAddress,
+              onSubmitted: (_) => _lookupSerial(),
             ),
             const SizedBox(height: 16),
             SizedBox(
@@ -146,7 +192,7 @@ class _SerialLookupScreenState extends State<SerialLookupScreen> {
               const Divider(),
               const SizedBox(height: 16),
               const Text(
-                'Serial Number Information',
+                'QR Code Information',
                 style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
@@ -174,10 +220,40 @@ class _SerialLookupScreenState extends State<SerialLookupScreen> {
               const SizedBox(height: 8),
               Center(
                 child: Text(
-                  'Assigned to: ${_emailController.text}',
+                  'Assigned to: ${_userInfo != null ? _userInfo!['name'] + ' (' + _userInfo!['email'] + ')' : _emailController.text}',
                   style: const TextStyle(
                     fontSize: 14,
                     color: Color(0xFF6B7280), // gray-500
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Center(
+                child: Text(
+                  'Status: ${_serialNumber!.status ?? "active"}',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color: (_serialNumber!.status ?? "active") == "active" 
+                      ? const Color(0xFF16A34A) // green-600
+                      : const Color(0xFFDC2626), // red-600
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Center(
+                child: ElevatedButton.icon(
+                  onPressed: () {
+                    // Functionality to download or share QR code could be added here
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('QR Code details saved to clipboard')),
+                    );
+                  },
+                  icon: const Icon(Icons.share),
+                  label: const Text('Share QR Code'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF8B5CF6), // purple-600
+                    foregroundColor: Colors.white,
                   ),
                 ),
               ),

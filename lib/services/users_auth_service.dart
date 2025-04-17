@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/user.dart';
 import 'backend_api_service.dart';
@@ -255,5 +254,3 @@ class AuthService {
     return null;
   }
 }
-
-

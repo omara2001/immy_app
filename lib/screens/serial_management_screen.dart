@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../models/serial_number.dart';
 import '../models/user_profile.dart';
 import '../services/serial_service.dart';
+import '../services/backend_api_service.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
 class SerialManagementScreen extends StatefulWidget {
@@ -16,87 +17,144 @@ class SerialManagementScreen extends StatefulWidget {
   State<SerialManagementScreen> createState() => _SerialManagementScreenState();
 }
 
-class _SerialManagementScreenState extends State<SerialManagementScreen> {
+class _SerialManagementScreenState extends State<SerialManagementScreen> with SingleTickerProviderStateMixin {
   List<SerialNumber> _serials = [];
   List<UserProfile> _users = [];
   bool _isLoading = true;
+  String? _error;
+  late TabController _tabController;
+  
+  final TextEditingController _searchController = TextEditingController();
+  List<UserProfile> _filteredUsers = [];
 
   @override
   void initState() {
     super.initState();
+    // Create tab controller
+    _tabController = TabController(length: 2, vsync: this);
+    // Explicitly set to first tab
+    _tabController.index = 0;
+    // Load data
     _loadData();
+  }
+  
+  @override
+  void dispose() {
+    _tabController.dispose();
+    _searchController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadData() async {
+    if (!mounted) return;
+    
     setState(() {
       _isLoading = true;
+      _error = null;
     });
 
     try {
+      // First initialize the database if needed
+      try {
+        await BackendApiService.initializeDatabase();
+      } catch (e) {
+        debugPrint('DB initialization warning (may be already initialized): $e');
+      }
+      
       // Load serials and users
       _serials = await widget.serialService.getSerialList();
       _users = await widget.serialService.getAllUsers();
+      _filteredUsers = List.from(_users);
       
       // If no data, initialize with sample data
       if (_serials.isEmpty || _users.isEmpty) {
         await widget.serialService.initWithSampleData();
         _serials = await widget.serialService.getSerialList();
         _users = await widget.serialService.getAllUsers();
+        _filteredUsers = List.from(_users);
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error loading data: $e')),
-        );
-      }
+      if (!mounted) return;
+      setState(() {
+        _error = 'Error loading data: $e';
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error loading data: $e')),
+      );
     } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+      });
     }
+  }
+
+  void _filterUsers(String query) {
+    if (query.isEmpty) {
+      setState(() {
+        _filteredUsers = List.from(_users);
+      });
+      return;
+    }
+    
+    final lowerQuery = query.toLowerCase();
+    setState(() {
+      _filteredUsers = _users.where((user) {
+        return user.name.toLowerCase().contains(lowerQuery) || 
+               user.email.toLowerCase().contains(lowerQuery);
+      }).toList();
+    });
   }
 
   Future<void> _generateSerials() async {
     final TextEditingController countController = TextEditingController(text: '1');
     
+    if (!mounted) return;
+    
     await showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Generate Serial Numbers'),
+        title: const Text('Generate QR Codes'),
         content: TextField(
           controller: countController,
           keyboardType: TextInputType.number,
           decoration: const InputDecoration(
-            labelText: 'Number of serials to generate',
+            labelText: 'Number of QR codes to generate',
           ),
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.of(context).pop(),
             child: const Text('Cancel'),
           ),
           TextButton(
             onPressed: () async {
               final count = int.tryParse(countController.text) ?? 1;
-              Navigator.pop(context);
+              Navigator.of(context).pop();
+              
+              if (!mounted) return;
+              setState(() {
+                _isLoading = true;
+              });
               
               try {
                 await widget.serialService.generateSerials(count);
                 await _loadData();
                 
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Generated $count serial numbers')),
-                  );
-                }
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Generated $count QR codes')),
+                );
               } catch (e) {
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Error generating serials: $e')),
-                  );
-                }
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Error generating QR codes: $e')),
+                );
+              } finally {
+                if (!mounted) return;
+                setState(() {
+                  _isLoading = false;
+                });
               }
             },
             child: const Text('Generate'),
@@ -106,51 +164,34 @@ class _SerialManagementScreenState extends State<SerialManagementScreen> {
     );
   }
 
-  Future<void> _assignSerial() async {
-    if (_serials.isEmpty || _users.isEmpty) {
+  Future<void> _assignSerial(UserProfile user) async {
+    if (!mounted) return;
+    final unassignedSerials = _serials.where((s) => s.assignedToUserId == null).toList();
+    
+    if (unassignedSerials.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No serials or users available')),
+        const SnackBar(content: Text('No unassigned QR codes available. Please generate more.')),
       );
       return;
     }
     
-    UserProfile? selectedUser;
     SerialNumber? selectedSerial;
     
     await showDialog(
       context: context,
+      barrierDismissible: true,
       builder: (context) => StatefulBuilder(
         builder: (context, setState) => AlertDialog(
-          title: const Text('Assign Serial Number'),
+          title: Text('Assign QR Code to ${user.name}'),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              DropdownButtonFormField<UserProfile>(
-                decoration: const InputDecoration(
-                  labelText: 'Select User',
-                ),
-                value: selectedUser,
-                items: _users.map((user) {
-                  return DropdownMenuItem<UserProfile>(
-                    value: user,
-                    child: Text('${user.name} (${user.email})'),
-                  );
-                }).toList(),
-                onChanged: (value) {
-                  setState(() {
-                    selectedUser = value;
-                  });
-                },
-              ),
-              const SizedBox(height: 16),
               DropdownButtonFormField<SerialNumber>(
                 decoration: const InputDecoration(
-                  labelText: 'Select Serial Number',
+                  labelText: 'Select QR Code',
                 ),
                 value: selectedSerial,
-                items: _serials
-                    .where((serial) => serial.assignedToUserId == null)
-                    .map((serial) {
+                items: unassignedSerials.map((serial) {
                   return DropdownMenuItem<SerialNumber>(
                     value: serial,
                     child: Text(serial.serial),
@@ -166,65 +207,13 @@ class _SerialManagementScreenState extends State<SerialManagementScreen> {
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(context),
+              onPressed: () => Navigator.of(context).pop(),
               child: const Text('Cancel'),
             ),
             TextButton(
-              onPressed: selectedUser != null && selectedSerial != null
-                  ? () async {
-                      Navigator.pop(context);
-                      
-                      try {
-                        // Check if user already has a serial
-                        final existingSerial = _serials.firstWhere(
-                          (s) => s.assignedToUserId == selectedUser!.id,
-                          orElse: () => SerialNumber(
-                            id: '',
-                            serial: '',
-                            qrCodePath: '',
-                          ),
-                        );
-                        
-                        if (existingSerial.id.isNotEmpty) {
-                          // User already has a serial, confirm replacement
-                          final shouldReplace = await _confirmReplaceSerial(
-                            selectedUser!,
-                            existingSerial,
-                            selectedSerial!,
-                          );
-                          
-                          if (shouldReplace && mounted) {
-                            await widget.serialService.replaceSerial(
-                              selectedUser!,
-                              selectedSerial!,
-                            );
-                            await _loadData();
-                            
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Serial number replaced successfully')),
-                            );
-                          }
-                        } else {
-                          // User doesn't have a serial, assign directly
-                          await widget.serialService.assignSerialToUser(
-                            selectedUser!,
-                            selectedSerial!,
-                          );
-                          await _loadData();
-                          
-                          if (mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Serial number assigned successfully')),
-                            );
-                          }
-                        }
-                      } catch (e) {
-                        if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Error assigning serial: $e')),
-                          );
-                        }
-                      }
+              onPressed: selectedSerial != null
+                  ? () {
+                      Navigator.of(context).pop(selectedSerial);
                     }
                   : null,
               child: const Text('Assign'),
@@ -232,7 +221,72 @@ class _SerialManagementScreenState extends State<SerialManagementScreen> {
           ],
         ),
       ),
-    );
+    ).then((result) async {
+      if (result == null || !mounted) return;
+      
+      setState(() {
+        _isLoading = true;
+      });
+      
+      try {
+        // Check if user already has a serial
+        final existingSerial = _serials.firstWhere(
+          (s) => s.assignedToUserId == user.id,
+          orElse: () => SerialNumber(
+            id: '',
+            serial: '',
+            qrCodePath: '',
+            status: 'inactive',
+          ),
+        );
+        
+        if (existingSerial.id.isNotEmpty) {
+          // User already has a serial, confirm replacement
+          if (!mounted) return;
+          final shouldReplace = await _confirmReplaceSerial(
+            user,
+            existingSerial,
+            result,
+          );
+          
+          if (shouldReplace && mounted) {
+            await widget.serialService.replaceSerial(
+              user,
+              result,
+            );
+            
+            // Show success message with QR preview
+            if (mounted) {
+              _showQRPreviewBottomSheet(user, result);
+            }
+          }
+        } else {
+          // User doesn't have a serial, assign directly
+          await widget.serialService.assignSerialToUser(
+            user,
+            result,
+          );
+          
+          // Show success message with QR preview
+          if (mounted) {
+            _showQRPreviewBottomSheet(user, result);
+          }
+        }
+        
+        // Reload data
+        await _loadData();
+      } catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error assigning QR code: $e')),
+        );
+      } finally {
+        if (!mounted) return;
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    });
   }
 
   Future<bool> _confirmReplaceSerial(
@@ -240,21 +294,23 @@ class _SerialManagementScreenState extends State<SerialManagementScreen> {
     SerialNumber oldSerial,
     SerialNumber newSerial,
   ) async {
+    if (!mounted) return false;
+    
     final result = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Replace Serial Number?'),
+        title: const Text('Replace QR Code?'),
         content: Text(
-          '${user.name} already has serial number ${oldSerial.serial}. '
+          '${user.name} already has QR code ${oldSerial.serial}. '
           'Do you want to replace it with ${newSerial.serial}?',
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context, false),
+            onPressed: () => Navigator.of(context).pop(false),
             child: const Text('Cancel'),
           ),
           TextButton(
-            onPressed: () => Navigator.pop(context, true),
+            onPressed: () => Navigator.of(context).pop(true),
             child: const Text('Replace'),
           ),
         ],
@@ -264,132 +320,331 @@ class _SerialManagementScreenState extends State<SerialManagementScreen> {
     return result ?? false;
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Serial Management'),
-        backgroundColor: const Color(0xFF8B5CF6), // purple-600
-        foregroundColor: Colors.white,
+  // Show QR code in a bottom sheet instead of a dialog
+  void _showQRPreviewBottomSheet(UserProfile user, SerialNumber serial) {
+    if (!mounted) return;
+    
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('QR code ${serial.serial} assigned to ${user.name}'),
+        action: SnackBarAction(
+          label: 'View QR',
+          onPressed: () {
+            if (!mounted) return;
+            
+            showModalBottomSheet(
+              context: context,
+              builder: (context) => Container(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'QR Code for ${user.name}',
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    QrImageView(
+                      data: serial.serial,
+                      version: QrVersions.auto,
+                      size: 200,
+                      backgroundColor: Colors.white,
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      serial.serial,
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
+                    ElevatedButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      child: const Text('Close'),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+        duration: const Duration(seconds: 4),
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text(
-                        'Serial Numbers',
-                        style: TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      Row(
-                        children: [
-                          ElevatedButton.icon(
-                            onPressed: _generateSerials,
-                            icon: const Icon(Icons.add),
-                            label: const Text('Generate'),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF8B5CF6), // purple-600
-                              foregroundColor: Colors.white,
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          ElevatedButton.icon(
-                            onPressed: _assignSerial,
-                            icon: const Icon(Icons.link),
-                            label: const Text('Assign'),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF8B5CF6), // purple-600
-                              foregroundColor: Colors.white,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
+    );
+  }
+
+  Widget _buildUserList() {
+    if (_filteredUsers.isEmpty) {
+      return const Center(
+        child: Text('No users found. Try adding users or changing the search query.'),
+      );
+    }
+    
+    return ListView.builder(
+      itemCount: _filteredUsers.length,
+      itemBuilder: (context, index) {
+        final user = _filteredUsers[index];
+        
+        // Find if user has a serial assigned
+        final assignedSerial = _serials.firstWhere(
+          (serial) => serial.assignedToUserId == user.id,
+          orElse: () => SerialNumber(id: '', serial: '', qrCodePath: '', status: 'inactive'),
+        );
+        
+        final hasSerial = assignedSerial.id.isNotEmpty;
+        
+        return Card(
+          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: ListTile(
+            title: Text(user.name),
+            subtitle: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Email: ${user.email}'),
+                if (hasSerial)
+                  Text(
+                    'QR Code: ${assignedSerial.serial}',
+                    style: const TextStyle(color: Colors.green),
+                  )
+                else
+                  const Text(
+                    'No QR code assigned',
+                    style: TextStyle(color: Colors.orange),
                   ),
-                  const SizedBox(height: 16),
-                  Expanded(
-                    child: _serials.isEmpty
-                        ? const Center(
-                            child: Text(
-                              'No serial numbers available. Generate some to get started.',
-                              textAlign: TextAlign.center,
-                            ),
-                          )
-                        : ListView.builder(
-                            itemCount: _serials.length,
-                            itemBuilder: (context, index) {
-                              final serial = _serials[index];
-                              final assignedUser = serial.assignedToUserId != null
-                                  ? _users.firstWhere(
-                                      (user) => user.id == serial.assignedToUserId,
-                                      orElse: () => UserProfile(
-                                        id: '',
-                                        name: 'Unknown',
-                                        email: '',
-                                        // No need to specify passwordHash as it's optional now
-                                      ),
-                                    )
-                                  : null;
-                              
-                              return Card(
-                                margin: const EdgeInsets.only(bottom: 12),
-                                child: Padding(
-                                  padding: const EdgeInsets.all(16.0),
-                                  child: Row(
-                                    children: [
-                                      SizedBox(
-                                        width: 100,
-                                        height: 100,
-                                        child: QrImageView(
-                                          data: serial.serial,
-                                          version: QrVersions.auto,
-                                          backgroundColor: Colors.white,
-                                        ),
-                                      ),
-                                      const SizedBox(width: 16),
-                                      Expanded(
-                                        child: Column(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
-                                          children: [
-                                            Text(
-                                              serial.serial,
-                                              style: const TextStyle(
-                                                fontWeight: FontWeight.bold,
-                                                fontSize: 16,
-                                              ),
-                                            ),
-                                            const SizedBox(height: 8),
-                                            Text(
-                                              assignedUser != null
-                                                  ? 'Assigned to: ${assignedUser.name} (${assignedUser.email})'
-                                                  : 'Not assigned',
-                                              style: TextStyle(
-                                                color: assignedUser != null
-                                                    ? const Color(0xFF16A34A) // green-600
-                                                    : const Color(0xFF6B7280), // gray-500
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              );
-                            },
-                          ),
+              ],
+            ),
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (hasSerial)
+                  IconButton(
+                    icon: const Icon(Icons.visibility),
+                    tooltip: 'View QR Code',
+                    onPressed: () {
+                      // Show bottom sheet instead of dialog
+                      _showQRPreviewBottomSheet(user, assignedSerial);
+                    },
                   ),
-                ],
+                IconButton(
+                  icon: Icon(
+                    hasSerial ? Icons.sync_alt : Icons.qr_code,
+                    color: Theme.of(context).primaryColor,
+                  ),
+                  tooltip: hasSerial ? 'Replace QR Code' : 'Assign QR Code',
+                  onPressed: () => _assignSerial(user),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildSerialList() {
+    if (_serials.isEmpty) {
+      return const Center(
+        child: Text('No QR codes generated yet. Use the + button to generate QR codes.'),
+      );
+    }
+    
+    return ListView.builder(
+      itemCount: _serials.length,
+      itemBuilder: (context, index) {
+        final serial = _serials[index];
+        final isAssigned = serial.assignedToUserId != null;
+        
+        // Find assigned user name if assigned
+        String assignedTo = 'Not assigned';
+        if (isAssigned) {
+          final user = _users.firstWhere(
+            (u) => u.id == serial.assignedToUserId,
+            orElse: () => UserProfile(id: '', name: 'Unknown', email: ''),
+          );
+          assignedTo = 'Assigned to: ${user.name}';
+        }
+        
+        return Card(
+          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: ListTile(
+            title: Text(serial.serial),
+            subtitle: Text(
+              assignedTo,
+              style: TextStyle(
+                color: isAssigned ? Colors.green : Colors.orange,
               ),
             ),
+            trailing: IconButton(
+              icon: const Icon(Icons.qr_code),
+              tooltip: 'View QR Code',
+              onPressed: () {
+                // Show bottom sheet instead of dialog
+                if (isAssigned) {
+                  final user = _users.firstWhere(
+                    (u) => u.id == serial.assignedToUserId,
+                    orElse: () => UserProfile(id: '', name: 'Unknown', email: ''),
+                  );
+                  _showQRPreviewBottomSheet(user, serial);
+                } else {
+                  // For unassigned serials, still use bottom sheet
+                  _showUnassignedQRPreview(serial);
+                }
+              },
+            ),
+          ),
+        );
+      },
+    );
+  }
+  
+  // Show unassigned QR code preview
+  void _showUnassignedQRPreview(SerialNumber serial) {
+    if (!mounted) return;
+    
+    showModalBottomSheet(
+      context: context,
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'QR Code (Unassigned)',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 16),
+            QrImageView(
+              data: serial.serial,
+              version: QrVersions.auto,
+              size: 200,
+              backgroundColor: Colors.white,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              serial.serial,
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            ElevatedButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Close'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_isLoading) {
+      return Scaffold(
+        appBar: AppBar(
+          title: const Text('QR Code Management'),
+          backgroundColor: const Color(0xFF8B5CF6), // purple-600
+          foregroundColor: Colors.white,
+        ),
+        body: const Center(
+          child: CircularProgressIndicator(),
+        ),
+      );
+    }
+    
+    if (_error != null) {
+      return Scaffold(
+        appBar: AppBar(
+          title: const Text('QR Code Management'),
+          backgroundColor: const Color(0xFF8B5CF6), // purple-600
+          foregroundColor: Colors.white,
+        ),
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(
+                Icons.error_outline,
+                color: Colors.red,
+                size: 48,
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Error loading data',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+              Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Text(_error!),
+              ),
+              ElevatedButton(
+                onPressed: _loadData,
+                child: const Text('Try Again'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('QR Code Management'),
+        backgroundColor: const Color(0xFF8B5CF6), // purple-600
+        foregroundColor: Colors.white,
+        bottom: TabBar(
+          controller: _tabController,
+          tabs: const [
+            Tab(text: 'Users', icon: Icon(Icons.people)),
+            Tab(text: 'QR Codes', icon: Icon(Icons.qr_code)),
+          ],
+          labelColor: Colors.white,
+          indicatorColor: Colors.white,
+        ),
+      ),
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: TextField(
+              controller: _searchController,
+              decoration: InputDecoration(
+                labelText: _tabController.index == 0 ? 'Search Users' : 'Search QR Codes',
+                border: const OutlineInputBorder(),
+                prefixIcon: const Icon(Icons.search),
+                suffixIcon: _searchController.text.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear),
+                        onPressed: () {
+                          _searchController.clear();
+                          _filterUsers('');
+                        },
+                      )
+                    : null,
+              ),
+              onChanged: _filterUsers,
+            ),
+          ),
+          Expanded(
+            child: TabBarView(
+              controller: _tabController,
+              physics: const NeverScrollableScrollPhysics(), // Disable swiping
+              children: [
+                _buildUserList(),
+                _buildSerialList(),
+              ],
+            ),
+          ),
+        ],
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: _generateSerials,
+        backgroundColor: const Color(0xFF8B5CF6), // purple-600
+        child: const Icon(Icons.add),
+      ),
     );
   }
 }

@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/user_profile.dart';
 import '../utils/password_util.dart';
 import 'package:uuid/uuid.dart';
+import 'package:flutter/foundation.dart';
 
 class AuthService {
   static const String _currentUserKey = 'current_user';
@@ -24,13 +25,13 @@ class AuthService {
   Future<bool> isCurrentUserAdmin() async {
     final currentUser = await getCurrentUser();
     final isAdmin = currentUser?.isAdmin ?? false;
-    print("Admin auth service - isCurrentUserAdmin: $isAdmin");
+    debugPrint("Admin auth service - isCurrentUserAdmin: $isAdmin");
     return isAdmin;
   }
   
   // Login with email and password
   Future<UserProfile?> login(String email, String password) async {
-    print("Admin auth service - login attempt: $email");
+    debugPrint("Admin auth service - login attempt: $email");
     final prefs = await SharedPreferences.getInstance();
     final profilesJson = prefs.getString(_userProfilesKey);
     
@@ -66,7 +67,7 @@ class AuthService {
     
     // Save current user
     await prefs.setString(_currentUserKey, jsonEncode(user.toJson()));
-    print("Admin auth service - logged in user: ${user.name}, isAdmin: ${user.isAdmin}");
+    debugPrint("Admin auth service - logged in user: ${user.name}, isAdmin: ${user.isAdmin}");
     
     return user;
   }
@@ -123,9 +124,17 @@ class AuthService {
       if (profiles.any((profile) => profile.email == email)) {
         // If admin already exists, just return it
         final existingAdmin = profiles.firstWhere((profile) => profile.email == email);
+        
+        // Make sure the existing administrator account has admin privileges
+        if (email == 'administrator' && !existingAdmin.isAdmin) {
+          existingAdmin.isAdmin = true;
+          await prefs.setString(_userProfilesKey, jsonEncode(profiles.map((p) => p.toJson()).toList()));
+          debugPrint("Fixing administrator account privileges: set to admin");
+        }
+        
         if (existingAdmin.isAdmin) {
           await prefs.setString(_currentUserKey, jsonEncode(existingAdmin.toJson()));
-          print("Admin user already exists, returning existing admin");
+          debugPrint("Admin user already exists, returning existing admin");
           return existingAdmin;
         }
         throw Exception('A user with this email already exists');
@@ -145,7 +154,7 @@ class AuthService {
       passwordHash: passwordHash,
     );
     
-    print("Creating new admin user: ${newProfile.name}, isAdmin: ${newProfile.isAdmin}");
+    debugPrint("Creating new admin user: ${newProfile.name}, isAdmin: ${newProfile.isAdmin}");
     
     // Add to list and save
     profiles.add(newProfile);
@@ -208,11 +217,53 @@ class AuthService {
       final adminExists = profiles.any((profile) => 
         profile.email == 'administrator' && profile.isAdmin);
       
+      // Create or fix the administrator account
       if (!adminExists) {
+        // If 'administrator' exists but without admin privileges, update it
+        final index = profiles.indexWhere((profile) => profile.email == 'administrator');
+        if (index >= 0) {
+          profiles[index].isAdmin = true;
+          await prefs.setString(_userProfilesKey, jsonEncode(profiles.map((p) => p.toJson()).toList()));
+          debugPrint("Fixed administrator account: granted admin privileges");
+          return;
+        }
+        
+        // Otherwise create a new administrator account
         await createAdminUser('Administrator', 'administrator', 'admin');
       }
     } catch (e) {
-      print("Error initializing admin user: $e");
+      debugPrint("Error initializing admin user: $e");
+    }
+  }
+  
+  // Get user by ID
+  Future<Map<String, dynamic>?> getUserById(int userId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final profilesJson = prefs.getString(_userProfilesKey);
+      
+      if (profilesJson == null) {
+        throw Exception('No user profiles found');
+      }
+      
+      final List<dynamic> decoded = jsonDecode(profilesJson);
+      final profiles = decoded.map((json) => UserProfile.fromJson(json)).toList();
+      
+      // Find user by ID
+      final matchingUser = profiles.firstWhere(
+        (profile) => profile.id == userId.toString(),
+        orElse: () => throw Exception('User not found'),
+      );
+      
+      return {
+        'id': matchingUser.id,
+        'name': matchingUser.name,
+        'email': matchingUser.email,
+        'is_admin': matchingUser.isAdmin,
+      };
+    } catch (e) {
+      debugPrint("Error fetching user by ID: $e");
+      return null;
     }
   }
 }

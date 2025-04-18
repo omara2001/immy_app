@@ -14,7 +14,7 @@ class AdminLoginScreen extends StatefulWidget {
 }
 
 class _AdminLoginScreenState extends State<AdminLoginScreen> {
-  final _emailController = TextEditingController(text: 'administrator');
+  final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   String _errorMessage = '';
   bool _isLoading = false;
@@ -28,29 +28,20 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
   }
 
   Future<void> _login() async {
-    // Validate inputs first
-    final email = _emailController.text.trim();
-    final password = _passwordController.text;
-    
-    // Force administrator login
-    if (email != 'administrator') {
-      setState(() {
-        _errorMessage = 'Only the administrator account can access this panel';
-      });
-      return;
-    }
-    
     setState(() {
       _isLoading = true;
       _errorMessage = '';
     });
 
     try {
-      final user = await widget.authService.login(email, password);
+      final user = await widget.authService.login(
+        _emailController.text.trim(), 
+        _passwordController.text
+      );
       
       if (user == null) {
         setState(() {
-          _errorMessage = 'Invalid administrator credentials';
+          _errorMessage = 'User not found';
           _isLoading = false;
         });
         return;
@@ -91,26 +82,17 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             const Text(
-              'Administrator Access Only',
+              'Admin Access Only',
               style: TextStyle(
                 fontSize: 24,
                 fontWeight: FontWeight.bold,
               ),
             ),
-            const SizedBox(height: 8),
-            const Text(
-              'Only the administrator account can access this panel',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Colors.grey,
-              ),
-            ),
             const SizedBox(height: 32),
             TextField(
               controller: _emailController,
-              enabled: false, // Only allow administrator login
               decoration: const InputDecoration(
-                labelText: 'Username',
+                labelText: 'Username/Email',
                 hintText: 'administrator',
                 border: OutlineInputBorder(),
                 prefixIcon: Icon(Icons.person),
@@ -135,7 +117,6 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
                 ),
               ),
               obscureText: _obscurePassword,
-              onSubmitted: (_) => _login(),
             ),
             const SizedBox(height: 16),
             if (_errorMessage.isNotEmpty)
@@ -150,21 +131,9 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
               width: double.infinity,
               child: ElevatedButton(
                 onPressed: _isLoading ? null : _login,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Theme.of(context).primaryColor,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                ),
                 child: _isLoading
-                    ? const SizedBox(
-                        height: 20,
-                        width: 20,
-                        child: CircularProgressIndicator(
-                          color: Colors.white,
-                          strokeWidth: 2,
-                        ),
-                      )
-                    : const Text('Login as Administrator'),
+                    ? const CircularProgressIndicator()
+                    : const Text('Login'),
               ),
             ),
           ],

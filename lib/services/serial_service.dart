@@ -1,8 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
-import 'dart:typed_data';
-import 'dart:ui';
 import 'dart:io'; // Add this import for File and Directory
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
@@ -15,8 +13,6 @@ import '../services/auth_service.dart';
 import '../services/users_auth_service.dart' as user_auth;
 import '../utils/password_util.dart'; // Make sure this path is correct
 import 'package:flutter/foundation.dart' show kIsWeb;
-import 'package:flutter/rendering.dart';
-import 'backend_api_service.dart';
 
 // Conditional imports
 
@@ -48,7 +44,7 @@ class SerialService {
       await _checkAdminAccess();
     } catch (e) {
       // Ignore the error for initial setup
-      debugPrint("Ignoring admin check for initial setup: $e");
+      print("Ignoring admin check for initial setup: $e");
     }
     
     final prefs = await SharedPreferences.getInstance();
@@ -91,7 +87,6 @@ class SerialService {
           qrCodePath: qrCodePath,
           // Assign the first two serials to our sample users
           assignedToUserId: i < 2 ? users[i].id : null,
-          status: 'active',
         ));
       }
     
@@ -127,10 +122,10 @@ class SerialService {
         
         // Create admin user in user auth service
         await _userAuthService.login('administrator', 'admin');
-        debugPrint("Synced admin user with user auth service");
+        print("Synced admin user with user auth service");
       }
     } catch (e) {
-      debugPrint("Error syncing admin user: $e");
+      print("Error syncing admin user: $e");
     }
   }
   
@@ -143,332 +138,209 @@ class SerialService {
   
   // Generate a QR code for a serial number and save it to local storage
   Future<String> generateQrCode(String serial) async {
-    // Create QR code widget
-    final qrCode = QrImageView(
-      data: serial,
-      version: QrVersions.auto,
-      size: 200.0,
-      backgroundColor: Colors.white,
-    );
-    
-    // Handle web vs mobile
+    // For web, just return a placeholder URL - no need to download
     if (kIsWeb) {
-      // For web, just return a placeholder URL - no need to download
       return 'qr_$serial.png';
-    } else {
-      // On mobile, save the QR code to the local file system
-      try {
-        final directory = await getApplicationDocumentsDirectory();
-        final path = '${directory.path}/qr_codes';
-        await Directory(path).create(recursive: true);
-        
-        final filePath = '$path/qr_$serial.png';
-        
-        // Convert the QR widget to image bytes and save to file
-        final qrImage = await _getQrImageBytes(qrCode);
-        final file = File(filePath);
-        await file.writeAsBytes(qrImage);
-        
-        return filePath;
-      } catch (e) {
-        // If there's an error saving the file, return a placeholder
-        debugPrint('Error saving QR code: $e');
-        return 'qr_$serial.png';
-      }
-    }
-  }
-
-  // Helper function to generate the image bytes for the QR code
-  Future<Uint8List> _getQrImageBytes(QrImageView qrCode) async {
+    } 
+    
+    // On mobile, save the QR code to the local file system
     try {
-      final boundary = await _createQrBoundary(qrCode);
-      final image = await boundary.toImage(pixelRatio: 3.0);
-      final byteData = await image.toByteData(format: ImageByteFormat.png);
-      if (byteData == null) throw Exception('Failed to generate QR code image');
-      return byteData.buffer.asUint8List();
+      final directory = await getApplicationDocumentsDirectory();
+      final path = '${directory.path}/qr_codes';
+      await Directory(path).create(recursive: true);
+      final filePath = '$path/qr_$serial.png';
+      
+      // Generate QR code directly without using Flutter widgets
+      final qrImage = QrImageView(
+        data: serial,
+        version: QrVersions.auto,
+        size: 200.0,
+        backgroundColor: Colors.white,
+      );
+      
+      // Create a placeholder file since we can't properly render the QR in a headless context
+      final file = File(filePath);
+      if (!await file.exists()) {
+        await file.writeAsString('QR code placeholder for: $serial');
+      }
+      
+      return filePath;
     } catch (e) {
-      throw Exception('Failed to generate QR code: $e');
+      // If there's an error saving the file, return a placeholder
+      print('Error saving QR code: $e');
+      return 'qr_$serial.png';
     }
   }
 
-  Future<RenderRepaintBoundary> _createQrBoundary(QrImageView qrCode) async {
-    final key = GlobalKey();
-    final RepaintBoundary boundary = RepaintBoundary(
-      key: key,
-      child: qrCode,
+  // Create a new user profile
+  Future<UserProfile> createUserProfile(String name, String email, {bool isAdmin = false}) async {
+    // Only admins can create admin users
+    if (isAdmin) {
+      await _checkAdminAccess();
+    }
+    
+    final prefs = await SharedPreferences.getInstance();
+    
+    // Get existing profiles
+    final List<UserProfile> profiles = await _getUserProfiles();
+    
+    // Check if email already exists
+    if (profiles.any((profile) => profile.email == email)) {
+      throw Exception('A user with this email already exists');
+    }
+    
+    // Create new profile
+    final newProfile = UserProfile(
+      id: _uuid.v4(),
+      name: name,
+      email: email,
+      isAdmin: isAdmin,
     );
-
-    // Create a temporary widget to render the QR code
-    final widget = MaterialApp(
-      home: Scaffold(body: boundary),
-    );
-
-    final BuildContext context = await _createTemporaryContext(widget);
-    await Future.delayed(const Duration(milliseconds: 100)); // Allow widget to render
     
-    final RenderRepaintBoundary renderObject = 
-        key.currentContext!.findRenderObject() as RenderRepaintBoundary;
-    return renderObject;
-  }
-
-  Future<BuildContext> _createTemporaryContext(Widget widget) async {
-    final completer = Completer<BuildContext>();
+    // Add to list and save
+    profiles.add(newProfile);
+    await prefs.setString(_userProfilesKey, jsonEncode(profiles.map((p) => p.toJson()).toList()));
     
-    runApp(Builder(builder: (ctx) {
-      completer.complete(ctx);
-      return widget;
-    }));
-    
-    return completer.future;
+    return newProfile;
   }
   
-  // Get registered users from the database
-  Future<List<UserProfile>> getAllUsers() async {
-    try {
-      // Try to fetch users from the database first
-      final dbUsers = await BackendApiService.getAllUsers();
-      
-      // Convert to UserProfile objects
-      final userProfiles = dbUsers.map((user) => UserProfile(
-        id: user['id'].toString(),
-        name: user['name'] ?? 'Unknown',
-        email: user['email'] ?? 'unknown@example.com',
-        isAdmin: user['is_admin'] == 1 || user['is_admin'] == true,
-      )).toList();
-      
-      // If we have users from the database, return them
-      if (userProfiles.isNotEmpty) {
-        return userProfiles;
-      }
-      
-      // Fall back to local storage if no users found in database
-      final prefs = await SharedPreferences.getInstance();
-      final profilesJson = prefs.getString(_userProfilesKey);
-      
-      if (profilesJson != null) {
-        final List<dynamic> decoded = jsonDecode(profilesJson);
-        return decoded.map((json) => UserProfile.fromJson(json)).toList();
-      }
-      
-      return [];
-    } catch (e) {
-      debugPrint('Error fetching users from database: $e');
-      
-      // Fall back to local storage
-      final prefs = await SharedPreferences.getInstance();
-      final profilesJson = prefs.getString(_userProfilesKey);
-      
-      if (profilesJson != null) {
-        final List<dynamic> decoded = jsonDecode(profilesJson);
-        return decoded.map((json) => UserProfile.fromJson(json)).toList();
-      }
-      
-      return [];
-    }
-  }
-  
-  // Get all serial numbers from database with fallback to local storage
-  Future<List<SerialNumber>> getSerialList() async {
-    try {
-      // Try to fetch from database first
-      final dbSerials = await BackendApiService.executeQuery(
-        'SELECT s.id, s.serial, s.user_id as assignedToUserId, s.status FROM SerialNumbers s'
-      );
-      
-      // If we have data from the database, convert and return it
-      if (dbSerials.isNotEmpty) {
-        final List<SerialNumber> serials = [];
-        for (final serial in dbSerials) {
-          final qrCodePath = await generateQrCode(serial['serial']);
-          serials.add(SerialNumber(
-            id: serial['id'].toString(),
-            serial: serial['serial'],
-            qrCodePath: qrCodePath,
-            assignedToUserId: serial['assignedToUserId']?.toString(),
-            status: serial['status'] ?? 'active',
-          ));
-        }
-        return serials;
-      }
-      
-      // Fall back to local storage
-      final prefs = await SharedPreferences.getInstance();
-      final serialsJson = prefs.getString(_serialNumbersKey);
-      
-      if (serialsJson != null) {
-        final List<dynamic> decoded = jsonDecode(serialsJson);
-        return decoded.map((json) => SerialNumber.fromJson(json)).toList();
-      }
-      
-      return [];
-    } catch (e) {
-      debugPrint('Error fetching serials from database: $e');
-      
-      // Fall back to local storage
-      final prefs = await SharedPreferences.getInstance();
-      final serialsJson = prefs.getString(_serialNumbersKey);
-      
-      if (serialsJson != null) {
-        final List<dynamic> decoded = jsonDecode(serialsJson);
-        return decoded.map((json) => SerialNumber.fromJson(json)).toList();
-      }
-      
-      return [];
-    }
-  }
-  
-  // Get serial number by user email from database
-  Future<SerialNumber?> getUserSerial(String email) async {
-    try {
-      // Try to find user in database first
-      final dbUser = await BackendApiService.getUserByEmail(email);
-      
-      if (dbUser != null) {
-        final userId = dbUser['id'];
-        final dbSerials = await BackendApiService.getQRCodesForUser(userId);
-        
-        if (dbSerials.isNotEmpty) {
-          final serial = dbSerials.first;
-          final qrCodePath = await generateQrCode(serial['serial']);
-          
-          return SerialNumber(
-            id: serial['id'].toString(),
-            serial: serial['serial'],
-            qrCodePath: qrCodePath,
-            assignedToUserId: userId.toString(),
-            status: serial['status'] ?? 'active',
-          );
-        }
-      }
-      
-      // Fall back to local storage
-      final users = await _getUserProfiles();
-      final user = users.firstWhere(
-        (u) => u.email.toLowerCase() == email.toLowerCase(),
-        orElse: () => throw Exception('User not found: $email'),
-      );
-      
-      final serials = await _getSerialNumbers();
-      final serial = serials.firstWhere(
-        (s) => s.assignedToUserId == user.id,
-        orElse: () => throw Exception('No serial number assigned to this user'),
-      );
-      
-      return serial;
-    } catch (e) {
-      debugPrint('Error looking up user serial: $e');
-      throw Exception('Could not find serial number for user $email');
-    }
-  }
-  
-  // Generate new serial numbers and save to database
-  Future<void> generateSerials(int count) async {
+  // Generate multiple serial numbers - admin only
+  Future<List<SerialNumber>> generateSerials(int count) async {
+    // This is an admin-only operation
     await _checkAdminAccess();
     
-    try {
-      final newSerials = <SerialNumber>[];
+    final prefs = await SharedPreferences.getInstance();
+    
+    // Get existing serials
+    final List<SerialNumber> serials = await _getSerialNumbers();
+    final List<SerialNumber> newSerials = [];
+    
+    // Generate new serials
+    for (int i = 0; i < count; i++) {
+      final serial = generateSerialNumber();
+      final qrCodePath = await generateQrCode(serial);
       
-      for (int i = 0; i < count; i++) {
-        final serial = generateSerialNumber();
-        final qrCodePath = await generateQrCode(serial);
-        
-        // Insert into database
-        await BackendApiService.executeQuery(
-          'INSERT INTO SerialNumbers (serial, status) VALUES (?, ?)',
-          [serial, 'active']
-        );
-        
-        newSerials.add(SerialNumber(
-          id: 'temp_${DateTime.now().millisecondsSinceEpoch}_$i',
-          serial: serial,
-          qrCodePath: qrCodePath,
-          status: 'active',
-        ));
-      }
+      final newSerial = SerialNumber(
+        id: _uuid.v4(),
+        serial: serial,
+        qrCodePath: qrCodePath,
+      );
       
-      // Also update local storage
-      final serials = await _getSerialNumbers();
-      serials.addAll(newSerials);
-      
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_serialNumbersKey, jsonEncode(serials.map((s) => s.toJson()).toList()));
-      
-    } catch (e) {
-      debugPrint('Error generating serials: $e');
-      throw Exception('Failed to generate serial numbers: $e');
+      newSerials.add(newSerial);
+      serials.add(newSerial);
     }
+    
+    // Save updated list
+    await prefs.setString(_serialNumbersKey, jsonEncode(serials.map((s) => s.toJson()).toList()));
+    
+    return newSerials;
   }
   
-  // Assign a serial number to a user in the database
+  // Assign a serial number to a user - admin only
   Future<void> assignSerialToUser(UserProfile user, SerialNumber serial) async {
+    // This is an admin-only operation
     await _checkAdminAccess();
     
-    try {
-      // Try to update in database first
-      await BackendApiService.assignQRCode(int.parse(user.id), serial.serial);
-      
-      // Also update in local storage
-      final serials = await _getSerialNumbers();
-      final index = serials.indexWhere((s) => s.id == serial.id);
-      
-      if (index >= 0) {
-        serials[index].assignedToUserId = user.id;
-        
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setString(_serialNumbersKey, jsonEncode(serials.map((s) => s.toJson()).toList()));
-      }
-    } catch (e) {
-      debugPrint('Error assigning serial to user: $e');
-      throw Exception('Failed to assign serial number: $e');
+    final prefs = await SharedPreferences.getInstance();
+    
+    // Get existing serials
+    final List<SerialNumber> serials = await _getSerialNumbers();
+    
+    // Find and update the serial
+    final index = serials.indexWhere((s) => s.id == serial.id);
+    if (index == -1) {
+      throw Exception('Serial number not found');
     }
+    
+    serials[index].assignedToUserId = user.id;
+    
+    // Save updated list
+    await prefs.setString(_serialNumbersKey, jsonEncode(serials.map((s) => s.toJson()).toList()));
   }
   
-  // Replace a user's serial number with a new one
+  // Replace a user's serial number with a new one - admin only
   Future<void> replaceSerial(UserProfile user, SerialNumber newSerial) async {
+    // This is an admin-only operation
     await _checkAdminAccess();
     
-    try {
-      // Get user's current serials from database
-      final dbSerials = await BackendApiService.getQRCodesForUser(int.parse(user.id));
-      
-      if (dbSerials.isNotEmpty) {
-        // Update existing serials to inactive
-        for (final serial in dbSerials) {
-          await BackendApiService.executeQuery(
-            'UPDATE SerialNumbers SET status = ? WHERE id = ?',
-            ['inactive', serial['id']]
-          );
-        }
-      }
-      
-      // Assign new serial
-      await BackendApiService.assignQRCode(int.parse(user.id), newSerial.serial);
-      
-      // Also update in local storage
-      final serials = await _getSerialNumbers();
-      
-      // Update any existing serials for this user to be unassigned
-      for (final s in serials) {
-        if (s.assignedToUserId == user.id) {
-          s.assignedToUserId = null;
-        }
-      }
-      
-      // Assign the new serial
-      final index = serials.indexWhere((s) => s.id == newSerial.id);
-      if (index >= 0) {
-        serials[index].assignedToUserId = user.id;
-        
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setString(_serialNumbersKey, jsonEncode(serials.map((s) => s.toJson()).toList()));
-      }
-    } catch (e) {
-      debugPrint('Error replacing serial: $e');
-      throw Exception('Failed to replace serial number: $e');
+    final prefs = await SharedPreferences.getInstance();
+    
+    // Get existing serials
+    final List<SerialNumber> serials = await _getSerialNumbers();
+    
+    // Find old serial assigned to user
+    final oldSerialIndex = serials.indexWhere((s) => s.assignedToUserId == user.id);
+    if (oldSerialIndex != -1) {
+      // Unassign old serial
+      serials[oldSerialIndex].assignedToUserId = null;
     }
+    
+    // Find and assign new serial
+    final newSerialIndex = serials.indexWhere((s) => s.id == newSerial.id);
+    if (newSerialIndex == -1) {
+      throw Exception('New serial number not found');
+    }
+    
+    serials[newSerialIndex].assignedToUserId = user.id;
+    
+    // Save updated list
+    await prefs.setString(_serialNumbersKey, jsonEncode(serials.map((s) => s.toJson()).toList()));
   }
   
-  // Helper method to get user profiles from local storage
+  // Get all serial numbers - admin only
+  Future<List<SerialNumber>> getSerialList() async {
+    // This is an admin-only operation
+    await _checkAdminAccess();
+    
+    return await _getSerialNumbers();
+  }
+  
+  // Get unassigned serial numbers - admin only
+  Future<List<SerialNumber>> getUnassignedSerials() async {
+    // This is an admin-only operation
+    await _checkAdminAccess();
+    
+    final serials = await _getSerialNumbers();
+    return serials.where((serial) => serial.assignedToUserId == null).toList();
+  }
+  
+  // Get a user's serial number - can be used by any user to get their own serial
+  Future<SerialNumber?> getUserSerial(String email) async {
+    final currentUser = await _authService.getCurrentUser();
+    final profiles = await _getUserProfiles();
+    final serials = await _getSerialNumbers();
+    
+    // Find user by email
+    final userList = profiles.where((profile) => profile.email == email).toList();
+    if (userList.isEmpty) {
+      return null;
+    }
+    
+    final user = userList.first;
+    
+    // If not admin and trying to access someone else's serial, deny access
+    if (!(currentUser?.isAdmin ?? false) && currentUser?.email != email) {
+      throw Exception('Access denied: You can only view your own serial number');
+    }
+    
+    // Find serial assigned to user
+    final userSerials = serials.where((serial) => serial.assignedToUserId == user.id).toList();
+    if (userSerials.isEmpty) {
+      return null;
+    }
+    
+    return userSerials.first;
+  }
+  
+  // Get all users - admin only
+  Future<List<UserProfile>> getAllUsers() async {
+    // This is an admin-only operation
+    await _checkAdminAccess();
+    
+    return await _getUserProfiles();
+  }
+  
+  // Helper method to get all user profiles from storage
   Future<List<UserProfile>> _getUserProfiles() async {
     final prefs = await SharedPreferences.getInstance();
     final profilesJson = prefs.getString(_userProfilesKey);
@@ -481,7 +353,7 @@ class SerialService {
     return decoded.map((json) => UserProfile.fromJson(json)).toList();
   }
   
-  // Helper method to get serial numbers from local storage
+  // Helper method to get all serial numbers from storage
   Future<List<SerialNumber>> _getSerialNumbers() async {
     final prefs = await SharedPreferences.getInstance();
     final serialsJson = prefs.getString(_serialNumbersKey);

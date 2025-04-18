@@ -48,8 +48,20 @@ class _RegisterScreenState extends State<RegisterScreen> {
       );
       
       if (mounted) {
-        // Navigate to home page and remove all previous routes
-        Navigator.of(context).pushReplacementNamed('/home');
+        // Show success message
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Registration successful! Please login to continue.'),
+            backgroundColor: Color(0xFF10B981), // green-600
+            duration: Duration(seconds: 3),
+          ),
+        );
+        
+        // Wait for snackbar to be visible before navigating
+        await Future.delayed(const Duration(seconds: 1));
+        
+        // Navigate to login page and remove all previous routes
+        Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
       }
     } catch (e) {
       setState(() {

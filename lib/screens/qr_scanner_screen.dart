@@ -149,6 +149,8 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
                     return const Icon(Icons.flash_off, color: Colors.white);
                   case TorchState.on:
                     return const Icon(Icons.flash_on, color: Colors.white);
+                  default:
+                    return const Icon(Icons.flash_off, color: Colors.white);
                 }
               },
             ),
@@ -162,6 +164,8 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
                   case CameraFacing.front:
                     return const Icon(Icons.camera_front, color: Colors.white);
                   case CameraFacing.back:
+                    return const Icon(Icons.camera_rear, color: Colors.white);
+                  default:
                     return const Icon(Icons.camera_rear, color: Colors.white);
                 }
               },
@@ -215,4 +219,10 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
       ),
     );
   }
+}
+
+extension on MobileScannerController {
+  get cameraFacingState => null;
+  
+  get torchState => null;
 }

@@ -43,14 +43,6 @@ class _LoginScreenState extends State<LoginScreen> {
       
       final user = await _authService.login(email, password);
       
-      if (user == null) {
-        setState(() {
-          _errorMessage = 'User not found';
-          _isLoading = false;
-        });
-        return;
-      }
-      
       print("Logged in user: ${user.name}, isAdmin: ${user.isAdmin}");
       
       if (mounted) {
@@ -271,3 +263,4 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 }
+

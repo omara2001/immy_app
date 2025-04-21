@@ -16,34 +16,150 @@ import 'screens/admin_login_screen.dart';
 import 'screens/admin_dashboard_screen.dart';
 import 'screens/admin_setup_screen.dart';
 import 'screens/login_screen.dart';
-import 'screens/register_screen.dart';
+import 'screens/recent_conversations_screen.dart';
+import 'screens/qr_scanner_screen.dart';
+import 'screens/device_management_screen.dart';
+import 'services/serial_service.dart';
+import 'services/api_service.dart';
+import 'services/auth_service.dart' as admin_auth;
+import 'services/users_auth_service.dart' as user_auth;
+import 'services/backend_api_service.dart'; 
 
-void main() async {
+Future<void> main() async {
   // Ensure Flutter is initialized
   WidgetsFlutterBinding.ensureInitialized();
   
   // Initialize services
+  final serialService = SerialService();
+  final apiService = ApiService();
   final adminAuthService = admin_auth.AuthService();
   final userAuthService = user_auth.AuthService();
+  
+  // Initialize database
+  try {
+    await BackendApiService.initializeDatabase();
+    debugPrint('Database initialized successfully');
+  } catch (e) {
+    debugPrint('Error initializing database: $e');
+  }
   
   // Initialize admin users
   await adminAuthService.initializeAdminUser();
   await userAuthService.initializeAdminUser();
   
   runApp(MyApp(
-    adminAuthService: adminAuthService,
-    userAuthService: userAuthService,
+    serialService: serialService,
+    apiService: apiService,
+    authService: adminAuthService, 
+    usersAuthService: userAuthService,
   ));
 }
 
+// Wrapper for admin-only screens
+class AdminRouteGuard extends StatelessWidget {
+  final Widget child;
+  final admin_auth.AuthService authService;
+
+  const AdminRouteGuard({
+    Key? key,
+    required this.child,
+    required this.authService,
+  }) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<bool>(
+      future: authService.isCurrentUserAdmin(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(
+            body: Center(
+              child: CircularProgressIndicator(),
+            ),
+          );
+        }
+
+        final isAdmin = snapshot.data ?? false;
+        if (!isAdmin) {
+          // Return to login page if not admin
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Access denied: Admin privileges required')),
+            );
+            Navigator.of(context).pushReplacementNamed('/admin/login');
+          });
+          return const Scaffold(
+            body: Center(
+              child: Text('Access denied. Redirecting to login...'),
+            ),
+          );
+        }
+
+        // User is admin, show the protected screen
+        return child;
+      },
+    );
+  }
+}
+
+// Wrapper for admin-only screens
+class AdminRouteGuard extends StatelessWidget {
+  final Widget child;
+  final admin_auth.AuthService authService;
+
+  const AdminRouteGuard({
+    Key? key,
+    required this.child,
+    required this.authService,
+  }) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<bool>(
+      future: authService.isCurrentUserAdmin(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(
+            body: Center(
+              child: CircularProgressIndicator(),
+            ),
+          );
+        }
+
+        final isAdmin = snapshot.data ?? false;
+        if (!isAdmin) {
+          // Return to login page if not admin
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Access denied: Admin privileges required')),
+            );
+            Navigator.of(context).pushReplacementNamed('/admin/login');
+          });
+          return const Scaffold(
+            body: Center(
+              child: Text('Access denied. Redirecting to login...'),
+            ),
+          );
+        }
+
+        // User is admin, show the protected screen
+        return child;
+      },
+    );
+  }
+}
+
 class MyApp extends StatelessWidget {
-  final admin_auth.AuthService adminAuthService;
-  final user_auth.AuthService userAuthService;
+  final SerialService serialService;
+  final ApiService apiService;
+  final admin_auth.AuthService authService;
+  final user_auth.AuthService usersAuthService;
   
   const MyApp({
-    super.key,
-    required this.adminAuthService,
-    required this.userAuthService,
+    super.key, 
+    required this.serialService,
+    required this.apiService,
+    required this.authService, required this.usersAuthService,
   });
 
   @override
@@ -66,8 +182,8 @@ class MyApp extends StatelessWidget {
         '/home': (context) => HomePage(
               serialService: serialService,
               apiService: apiService,
-              authService: adminAuthService,
-              usersAuthService: userAuthService,
+              authService: authService,
+              usersAuthService: usersAuthService,
             ),
         '/terms': (context) => const TermsOfServicePage(),
         '/serial-management': (context) => SerialManagementScreen(
@@ -79,9 +195,12 @@ class MyApp extends StatelessWidget {
         '/admin/login': (context) => AdminLoginScreen(
               authService: adminAuthService,
             ),
-        '/admin/dashboard': (context) => AdminDashboardScreen(
-              serialService: serialService,
-              authService: adminAuthService,
+        '/admin/dashboard': (context) => AdminRouteGuard(
+              authService: authService,
+              child: AdminDashboardScreen(
+                serialService: serialService,
+                authService: authService,
+              ),
             ),
         '/admin-setup': (context) => AdminSetupScreen(
               authService: adminAuthService,
@@ -99,6 +218,8 @@ class SplashScreen extends StatefulWidget {
 }
 
 class _SplashScreenState extends State<SplashScreen> {
+  final usersAuthService = user_auth.AuthService();
+  
   @override
   void initState() {
     super.initState();
@@ -118,23 +239,30 @@ class _SplashScreenState extends State<SplashScreen> {
       // Check if user is admin
       final isAdmin = await userAuth.isCurrentUserAdmin();
       
-      if (isAdmin) {
-        // If admin, go to admin dashboard
-        Navigator.of(context).pushReplacementNamed('/admin/dashboard');
+      if (!mounted) return;
+      
+      if (isLoggedIn) {
+        // Check if terms are accepted
+        final prefs = await SharedPreferences.getInstance();
+        final bool termsAccepted = prefs.getBool('terms_accepted') ?? false;
+        
+        if (!mounted) return;
+        
+        if (termsAccepted) {
+          // User has already accepted terms, go directly to home page
+          Navigator.of(context).pushReplacementNamed('/home');
+        } else {
+          // User is logged in but hasn't accepted terms
+          Navigator.of(context).pushReplacementNamed('/terms');
+        }
       } else {
-        // If regular user, go to home
-        Navigator.of(context).pushReplacementNamed('/home');
+        // User is not logged in, go to login page
+        if (!mounted) return;
+        Navigator.of(context).pushReplacementNamed('/login');
       }
-    } else {
-      // Not logged in, check if terms accepted
-      final prefs = await SharedPreferences.getInstance();
-      final bool termsAccepted = prefs.getBool('terms_accepted') ?? false;
-
-      if (!termsAccepted) {
-        // First time user, show terms of service
-        Navigator.of(context).pushReplacementNamed('/terms');
-      } else {
-        // Terms accepted but not logged in, go to login
+    } catch (e) {
+      // If there's an error, default to login page
+      if (mounted) {
         Navigator.of(context).pushReplacementNamed('/login');
       }
     }

@@ -88,15 +88,15 @@ Immy App connects with the **Immy Brainy Bear** to log conversations and present
 3. Run the app
    flutter run
 
-### Authentication steps is handled by users_auth_service 
-  ##### steps to perform
+### Authentication process is handled by users_auth_service and backend_api_service 
+  ##### steps to use
 
-1. Download Xampp and open it and the sql server to start the server
+1. check the backend_api_service.dart code for the api end points
   
 
-2. open htdocs folder and create a new folder on it name it immy_app and copy the folder of the api in it
+2. try to register by your email then you can access immy_App
 
-3. open the Admin panal of the php my admin and create a new database name it immy_app and import the sql file  which named database.sql which found in the api folder and now you can use the api by using the url of the server which is (http://localhost/immy_app/api)
+3. Now you can sign in by your Account that you created your email and your password to immy_App  
 
 
 📂 Assets

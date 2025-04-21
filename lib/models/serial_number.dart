@@ -3,12 +3,14 @@ class SerialNumber {
   final String serial;
   final String qrCodePath;
   String? assignedToUserId;
+  final String status;
 
   SerialNumber({
     required this.id,
     required this.serial,
     required this.qrCodePath,
     this.assignedToUserId,
+    required this.status,
   });
 
   // Convert to and from JSON for storage
@@ -18,6 +20,7 @@ class SerialNumber {
       serial: json['serial'],
       qrCodePath: json['qrCodePath'],
       assignedToUserId: json['assignedToUserId'],
+      status: json['status'] ?? 'active',
     );
   }
 
@@ -27,6 +30,7 @@ class SerialNumber {
       'serial': serial,
       'qrCodePath': qrCodePath,
       'assignedToUserId': assignedToUserId,
+      'status': status,
     };
   }
 }

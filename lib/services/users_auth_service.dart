@@ -1,15 +1,10 @@
 import 'dart:convert';
-import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/user.dart';
-import '../utils/password_util.dart';
+import 'backend_api_service.dart';
 
 class AuthService {
-  // Base URL for API - change this to your XAMPP server address
-  final String baseUrl = 'http://localhost/immy_app/api'; // For Android emulator
-  // Use 'http://localhost/immy_app/api' for iOS simulator or web
-  // Use 'http://10.0.2.2/immy_app/api'; // Android emulator accessing localhost
-  
+  final String baseUrl = 'http://immy-database.czso7gvuv5td.eu-north-1.rds.amazonaws.comi'; // Replace with your API URL
   // Token storage key
   static const String _tokenKey = 'auth_token';
   static const String _userKey = 'user_data';
@@ -17,31 +12,27 @@ class AuthService {
   // Register a new user
   Future<User> register(String name, String email, String password) async {
     try {
-      final response = await http.post(
-        Uri.parse('$baseUrl/register.php'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'name': name,
-          'email': email,
-          'password': password,
-        }),
+      // Try to create user in the database
+      final userData = await BackendApiService.createUser(name, email, password);
+      
+      // Create a user object with a token
+      final user = User(
+        id: userData['id'],
+        name: userData['name'],
+        email: userData['email'],
+        token: _generateToken(userData['id'].toString()),
+        isAdmin: false,
       );
       
-      final data = jsonDecode(response.body);
-      
-      if (data['status'] == true) {
-        final user = User.fromJson(data['data']);
-        await _saveUserData(user);
-        return user;
-      } else {
-        throw Exception(data['message']);
-      }
+      // Save user data locally
+      await _saveUserData(user);
+      return user;
     } catch (e) {
       // If API call fails, try local authentication for admin
       if (email == 'administrator') {
         return _checkLocalAdminLogin(email, password);
       }
-      throw Exception('Login failed: $e');
+      throw Exception('Registration failed: $e');
     }
   }
   
@@ -53,24 +44,30 @@ class AuthService {
         return _checkLocalAdminLogin(email, password);
       }
       
-      final response = await http.post(
-        Uri.parse('$baseUrl/login.php'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'email': email,
-          'password': password,
-        }),
+      // Try to get user from database
+      final userData = await BackendApiService.getUserByEmail(email);
+      
+      if (userData == null) {
+        throw Exception('User not found');
+      }
+      
+      // In a real app, you would verify the password hash here
+      if (userData['password'] != password) {
+        throw Exception('Invalid password');
+      }
+      
+      // Create a user object with a token
+      final user = User(
+        id: userData['id'],
+        name: userData['name'],
+        email: userData['email'],
+        token: _generateToken(userData['id'].toString()),
+        isAdmin: false, // Set based on database value if available
       );
       
-      final data = jsonDecode(response.body);
-      
-      if (data['status'] == true) {
-        final user = User.fromJson(data['data']);
-        await _saveUserData(user);
-        return user;
-      } else {
-        throw Exception(data['message']);
-      }
+      // Save user data locally
+      await _saveUserData(user);
+      return user;
     } catch (e) {
       // If API call fails, try local authentication for admin
       if (email == 'administrator') {
@@ -121,20 +118,35 @@ class AuthService {
       };
     }
     
-    final response = await http.get(
-      Uri.parse('$baseUrl/profile.php'),
-      headers: {
-        'Authorization': 'Bearer $token',
-      },
-    );
-    
-    final data = jsonDecode(response.body);
-    
-    if (data['status'] == true) {
-      return data['data'];
-    } else {
-      throw Exception(data['message']);
+    // If it's a local admin token, return admin profile
+    if (token == 'local_admin_token') {
+      return {
+        'id': 0,
+        'name': 'Administrator',
+        'email': 'administrator',
+        'isAdmin': true,
+      };
     }
+    
+    // Get user ID from token
+    final userId = _getUserIdFromToken(token);
+    if (userId == null) {
+      throw Exception('Invalid token');
+    }
+    
+    // In a real app, you would fetch the user profile from the database
+    // For now, we'll just return the current user data
+    final user = await getCurrentUser();
+    if (user == null) {
+      throw Exception('User not found');
+    }
+    
+    return {
+      'id': user.id,
+      'name': user.name,
+      'email': user.email,
+      'isAdmin': user.isAdmin,
+    };
   }
   
   // Logout user
@@ -230,5 +242,25 @@ class AuthService {
     } catch (e) {
       print("Error initializing admin user: $e");
     }
+  }
+  
+  // Generate a simple token (in a real app, use a proper JWT)
+  String _generateToken(String userId) {
+    final timestamp = DateTime.now().millisecondsSinceEpoch.toString();
+    return base64Encode(utf8.encode('$userId:$timestamp'));
+  }
+  
+  // Extract user ID from token
+  int? _getUserIdFromToken(String token) {
+    try {
+      final decoded = utf8.decode(base64Decode(token));
+      final parts = decoded.split(':');
+      if (parts.length == 2) {
+        return int.parse(parts[0]);
+      }
+    } catch (e) {
+      print("Error decoding token: $e");
+    }
+    return null;
   }
 }

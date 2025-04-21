@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
+import 'backend_api_service.dart';
 
 class ApiService {
   // Base URL for the API
@@ -160,6 +161,42 @@ class ApiService {
       }
     } else {
       throw Exception('Failed to get recent conversations: ${response.statusCode}');
+    }
+  }
+
+  // Get real conversation data from the database
+  Future<List<Map<String, dynamic>>> getRealConversations(String? token) async {
+    try {
+      // Get user ID from token
+      int? userId;
+      if (token != null) {
+        // In a real app, you would extract the user ID from the token
+        // For now, we'll just use a placeholder
+        userId = 1;
+      }
+      
+      if (userId == null) {
+        throw Exception('Invalid token');
+      }
+      
+      // Get audio records for this user
+      final audioRecords = await BackendApiService.getUserAudioRecords(userId);
+      
+      // Convert to conversation format
+      return audioRecords.map((record) {
+        return {
+          'id': record['id'].toString(),
+          'title': 'Conversation ${record['id']}',
+          'timestamp': record['recorded_at'],
+          'message_count': 1, // Placeholder
+          'topics': ['AI', 'Learning'], // Placeholder
+          'summary': 'Conversation with Immy Bear', // Placeholder
+        };
+      }).toList();
+    } catch (e) {
+      print('Error getting real conversations: $e');
+      // Fall back to mock data
+      return getMockRecentConversations();
     }
   }
   

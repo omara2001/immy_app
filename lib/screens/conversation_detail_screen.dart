@@ -379,10 +379,10 @@ class _ConversationDetailScreenState extends State<ConversationDetailScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           if (isImmy) ...[
-            CircleAvatar(
-              backgroundColor: const Color(0xFFDDEEFD),
+            const CircleAvatar(
+              backgroundColor: Color(0xFFDDEEFD),
               radius: 16,
-              child: const Text(
+              child: Text(
                 'IB',
                 style: TextStyle(
                   color: Color(0xFF1E40AF),
@@ -427,10 +427,10 @@ class _ConversationDetailScreenState extends State<ConversationDetailScreen> {
           ),
           if (!isImmy) ...[
             const SizedBox(width: 8),
-            CircleAvatar(
-              backgroundColor: const Color(0xFFF3E8FF),
+            const CircleAvatar(
+              backgroundColor: Color(0xFFF3E8FF),
               radius: 16,
-              child: const Text(
+              child: Text(
                 'E',
                 style: TextStyle(
                   color: Color(0xFF7E22CE),

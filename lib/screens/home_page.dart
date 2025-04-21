@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import '../models/user.dart';
 import '../widgets/subscription_banner.dart';
 import '../services/serial_service.dart';
 import '../services/api_service.dart';
@@ -9,7 +8,6 @@ import 'insights_page.dart';
 import 'coach_page.dart';
 import 'payments_page.dart';
 import 'settings_page.dart';
-import 'recent_conversations_screen.dart';
 
 class HomePage extends StatefulWidget {
   final SerialService serialService;
@@ -45,7 +43,7 @@ class _HomePageState extends State<HomePage> {
       InsightsPage(apiService: widget.apiService),
       CoachPage(apiService: widget.apiService),
       const PaymentsPage(),
-      SettingsPage(serialService: widget.serialService),
+      const SettingsPage(),
     ];
     
     _checkAdminStatus();
@@ -173,6 +171,10 @@ class _HomePageState extends State<HomePage> {
               onPressed: () => Navigator.pushNamed(context, '/admin/dashboard'),
             ),
           IconButton(
+            icon: const Icon(Icons.qr_code_scanner, color: Colors.white),
+            onPressed: () => Navigator.pushNamed(context, '/scan-qr-code'),
+          ),  
+          IconButton(
             icon: const Icon(Icons.notifications_outlined, color: Colors.white),
             onPressed: () {},
           ),
@@ -277,7 +279,7 @@ class _HomePageState extends State<HomePage> {
                 ),
               ],
             ),
-          ),
+            ),
           ListTile(
             leading: const Icon(Icons.home),
             title: const Text('Home'),
@@ -451,6 +453,15 @@ class HomeContent extends StatelessWidget {
                   const Color(0xFFFEF3C7),
                   const Color(0xFFD97706),
                 ),
+                _buildQuickActionCard(
+                  context,
+                  Icons.group_add,
+                  'Add Another Immy',
+                  'Link a new Immy bear',
+                  const Color(0xFFEDE9FE), // purple-100
+                  const Color(0xFF8B5CF6), // purple-600
+                  onTap: () => Navigator.pushNamed(context, '/device-management'),
+                ),
                 // Only show device management for admins
                 if (isAdmin)
                   _buildQuickActionCard(
@@ -572,4 +583,3 @@ class HomeContent extends StatelessWidget {
     );
   }
 }
-

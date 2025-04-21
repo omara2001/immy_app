@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
-import '../models/serial_number.dart';
 import '../services/serial_service.dart';
-import '../services/backend_api_service.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import '../services/backend_api_service.dart';
+import 'package:flutter/foundation.dart';
 
 class SerialLookupScreen extends StatefulWidget {
   final SerialService serialService;
@@ -18,24 +18,9 @@ class SerialLookupScreen extends StatefulWidget {
 
 class _SerialLookupScreenState extends State<SerialLookupScreen> {
   final TextEditingController _emailController = TextEditingController();
-  SerialNumber? _serialNumber;
+  Map<String, dynamic>? _qrCodeData;
   bool _isLoading = false;
   String? _errorMessage;
-  Map<String, dynamic>? _userInfo;
-
-  @override
-  void initState() {
-    super.initState();
-    _initializeDatabase();
-  }
-
-  Future<void> _initializeDatabase() async {
-    try {
-      await BackendApiService.initializeDatabase();
-    } catch (e) {
-      print('DB initialization warning (may be already initialized): $e');
-    }
-  }
 
   Future<void> _lookupSerial() async {
     final email = _emailController.text.trim();
@@ -49,47 +34,100 @@ class _SerialLookupScreenState extends State<SerialLookupScreen> {
     setState(() {
       _isLoading = true;
       _errorMessage = null;
-      _serialNumber = null;
-      _userInfo = null;
+      _qrCodeData = null;
     });
 
     try {
-      // First try to get the user from the database
-      final dbUser = await BackendApiService.getUserByEmail(email);
+      // First search for the user
+      final users = await BackendApiService.executeQuery('''
+        SELECT id, name, email 
+        FROM Users 
+        WHERE email = ?
+      ''', [email]);
+
+      if (users.isEmpty) {
+        setState(() {
+          _errorMessage = 'No user found with this email address.';
+        });
+        return;
+      }
+
+      final user = users.first;
       
-      if (dbUser != null) {
-        final userId = dbUser['id'];
-        _userInfo = dbUser;
-        
-        // Try to get their QR codes
-        final qrCodes = await BackendApiService.getQRCodesForUser(userId);
-        
-        if (qrCodes.isNotEmpty) {
-          final qrCode = qrCodes.first;
-          final qrCodePath = await widget.serialService.generateQrCode(qrCode['serial']);
-          
-          setState(() {
-            _serialNumber = SerialNumber(
-              id: qrCode['id'].toString(),
-              serial: qrCode['serial'],
-              qrCodePath: qrCodePath,
-              assignedToUserId: userId.toString(),
-              status: qrCode['status'] ?? 'active',
-            );
-          });
-          return;
-        }
-      } 
+      // Log for debugging
+      print('Found user: ${user['name']} (ID: ${user['id']})');
       
-      // Fallback to local storage method if database didn't find anything
-      final serial = await widget.serialService.getUserSerial(email);
+      // Check if assigned_at column exists in the SerialNumbers table
+      List<Map<String, dynamic>> columns = [];
+      if (!kIsWeb) {
+        columns = await BackendApiService.executeQuery(
+          "SHOW COLUMNS FROM SerialNumbers LIKE 'assigned_at'");
+      }
+      
+      // Then get their QR code with appropriate query, focusing on user_id rather than status
+      List<Map<String, dynamic>> qrCodes;
+      if (columns.isEmpty && !kIsWeb) {
+        // If assigned_at doesn't exist
+        qrCodes = await BackendApiService.executeQuery('''
+          SELECT 
+            s.id,
+            s.serial,
+            s.status,
+            s.created_at,
+            u.name as assigned_to_name,
+            u.email as assigned_to_email
+          FROM SerialNumbers s
+          JOIN Users u ON s.user_id = u.id
+          WHERE s.user_id = ?
+        ''', [user['id']]);
+      } else {
+        // If assigned_at exists or we're on web
+        qrCodes = await BackendApiService.executeQuery('''
+          SELECT 
+            s.id,
+            s.serial,
+            s.status,
+            s.created_at,
+            s.assigned_at,
+            u.name as assigned_to_name,
+            u.email as assigned_to_email
+          FROM SerialNumbers s
+          JOIN Users u ON s.user_id = u.id
+          WHERE s.user_id = ?
+        ''', [user['id']]);
+      }
+      
+      // Log for debugging
+      print('Found ${qrCodes.length} QR codes for user ${user['name']}');
+      
+      // If still no QR codes found, try a more lenient query
+      if (qrCodes.isEmpty) {
+        // Try an alternative query that only relies on the user_id in SerialNumbers
+        qrCodes = await BackendApiService.executeQuery('''
+          SELECT 
+            s.id,
+            s.serial,
+            s.status,
+            s.created_at,
+            u.name as assigned_to_name,
+            u.email as assigned_to_email
+          FROM SerialNumbers s
+          JOIN Users u ON u.id = ?
+          WHERE s.user_id = ?
+        ''', [user['id'], user['id']]);
+        
+        print('Alternative query found ${qrCodes.length} QR codes for user ${user['name']}');
+      }
+
       setState(() {
-        _serialNumber = serial;
-        if (serial == null) {
+        if (qrCodes.isEmpty) {
           _errorMessage = 'No QR code assigned to this user.';
+        } else {
+          _qrCodeData = qrCodes.first;
         }
       });
     } catch (e) {
+      print('Error during lookup: $e');
       setState(() {
         _errorMessage = e.toString();
       });
@@ -135,7 +173,6 @@ class _SerialLookupScreenState extends State<SerialLookupScreen> {
                 prefixIcon: Icon(Icons.email),
               ),
               keyboardType: TextInputType.emailAddress,
-              onSubmitted: (_) => _lookupSerial(),
             ),
             const SizedBox(height: 16),
             SizedBox(
@@ -187,80 +224,105 @@ class _SerialLookupScreenState extends State<SerialLookupScreen> {
                 ),
               ),
             ],
-            if (_serialNumber != null) ...[
+            if (_qrCodeData != null) ...[
               const SizedBox(height: 24),
               const Divider(),
               const SizedBox(height: 16),
-              const Text(
-                'QR Code Information',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'QR Code Information',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  // Add a refresh button
+                  IconButton(
+                    icon: const Icon(Icons.refresh),
+                    onPressed: _lookupSerial,
+                    tooltip: 'Refresh QR code data',
+                  ),
+                ],
               ),
               const SizedBox(height: 16),
               Center(
-                child: QrImageView(
-                  data: _serialNumber!.serial,
-                  version: QrVersions.auto,
-                  size: 200,
-                  backgroundColor: Colors.white,
-                ),
-              ),
-              const SizedBox(height: 16),
-              Center(
-                child: Text(
-                  _serialNumber!.serial,
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
+                child: Container(
+                  decoration: BoxDecoration(
+                    border: Border.all(color: const Color(0xFFE5E7EB)), // gray-200
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  padding: const EdgeInsets.all(16),
+                  child: QrImageView(
+                    data: _qrCodeData!['serial'] ?? 'Invalid QR Code',
+                    version: QrVersions.auto,
+                    size: 200,
+                    backgroundColor: Colors.white,
                   ),
                 ),
               ),
+              const SizedBox(height: 16),
+              _buildInfoCard('Serial Number', _qrCodeData!['serial'] ?? 'N/A'),
               const SizedBox(height: 8),
-              Center(
-                child: Text(
-                  'Assigned to: ${_userInfo != null ? _userInfo!['name'] + ' (' + _userInfo!['email'] + ')' : _emailController.text}',
-                  style: const TextStyle(
-                    fontSize: 14,
-                    color: Color(0xFF6B7280), // gray-500
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-              Center(
-                child: Text(
-                  'Status: ${_serialNumber!.status ?? "active"}',
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
-                    color: (_serialNumber!.status ?? "active") == "active" 
-                      ? const Color(0xFF16A34A) // green-600
-                      : const Color(0xFFDC2626), // red-600
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-              Center(
-                child: ElevatedButton.icon(
-                  onPressed: () {
-                    // Functionality to download or share QR code could be added here
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('QR Code details saved to clipboard')),
-                    );
-                  },
-                  icon: const Icon(Icons.share),
-                  label: const Text('Share QR Code'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF8B5CF6), // purple-600
-                    foregroundColor: Colors.white,
-                  ),
-                ),
-              ),
+              _buildInfoCard('Status', _qrCodeData!['status'] ?? 'Active'),
+              const SizedBox(height: 8),
+              _buildInfoCard('Assigned To', '${_qrCodeData!['assigned_to_name'] ?? 'N/A'} (${_qrCodeData!['assigned_to_email'] ?? 'N/A'})'),
+              const SizedBox(height: 8),
+              _buildInfoCard('Assigned On', _getAssignmentDate()),
             ],
           ],
         ),
       ),
     );
+  }
+  
+  // Helper widget for info cards
+  Widget _buildInfoCard(String label, String value) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF9FAFB), // gray-50
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFE5E7EB)), // gray-200
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 12,
+              color: Color(0xFF6B7280), // gray-500
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            value,
+            style: const TextStyle(
+              fontSize: 16,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+  
+  // Helper method to get the assignment date text
+  String _getAssignmentDate() {
+    if (_qrCodeData == null) return 'N/A';
+    
+    if (_qrCodeData!.containsKey('assigned_at') && _qrCodeData!['assigned_at'] != null) {
+      return _qrCodeData!['assigned_at'].toString();
+    } 
+    
+    // Fallback to created_at if assigned_at is not available
+    if (_qrCodeData!.containsKey('created_at') && _qrCodeData!['created_at'] != null) {
+      return _qrCodeData!['created_at'].toString();
+    }
+    
+    return 'N/A';
   }
 }

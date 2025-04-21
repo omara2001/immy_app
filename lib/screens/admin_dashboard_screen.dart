@@ -1,137 +1,115 @@
 import 'package:flutter/material.dart';
-import 'package:immy_app/services/serial_service.dart';
 import '../services/admin_dashboard_service.dart';
 import '../services/auth_service.dart';
+import '../services/serial_service.dart';
+import '../models/user_profile.dart';
 
 class AdminDashboardScreen extends StatefulWidget {
-  final AuthService authService;
   final SerialService serialService;
+  final AuthService authService;
 
   const AdminDashboardScreen({
     Key? key,
-    required this.authService, 
     required this.serialService,
+    required this.authService,
   }) : super(key: key);
 
   @override
-  _AdminDashboardScreenState createState() => _AdminDashboardScreenState();
+  State<AdminDashboardScreen> createState() => _AdminDashboardScreenState();
 }
 
 class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   List<Map<String, dynamic>> _users = [];
+  List<Map<String, dynamic>> _qrCodes = [];
   bool _isLoading = true;
-  String _errorMessage = '';
-  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
+  UserProfile? _currentUser;
 
   @override
   void initState() {
     super.initState();
-    _checkAdmin();
+    _loadData();
+    _loadCurrentUser();
   }
 
-  // Check if user is admin before loading data
-  Future<void> _checkAdmin() async {
-    final isAdmin = await widget.authService.isCurrentUserAdmin();
-    if (!isAdmin) {
-      if (mounted) {
-        setState(() {
-          _errorMessage = 'Access denied: Admin privileges required';
-          _isLoading = false;
-        });
-        // Navigate back to login after a short delay
-        Future.delayed(const Duration(seconds: 2), () {
-          if (mounted) {
-            Navigator.of(context).pushReplacementNamed('/admin/login');
-          }
-        });
-      }
-    } else {
-      _loadData();
+  Future<void> _loadCurrentUser() async {
+    final user = await widget.authService.getCurrentUser();
+    if (mounted) {
+      setState(() {
+        _currentUser = user;
+      });
     }
   }
 
   Future<void> _loadData() async {
-    if (!mounted) return;
-    
     setState(() {
       _isLoading = true;
-      _errorMessage = '';
     });
 
     try {
-      // Double-check admin status for security
-      final isAdmin = await widget.authService.isCurrentUserAdmin();
-      print("Admin dashboard - admin auth service isAdmin check: $isAdmin");
-      
-      if (!isAdmin && !isUserAdmin) {
-        setState(() {
-          _errorMessage = 'Access denied: Admin privileges required';
-          _isLoading = false;
-        });
-        return;
-      }
-
       final users = await AdminDashboardService.getRegisteredUsers();
+      final qrCodes = await AdminDashboardService.getAllQRCodes();
       
       if (mounted) {
         setState(() {
           _users = users;
-          _isLoading = false;
+          _qrCodes = qrCodes;
         });
       }
     } catch (e) {
       if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error loading data: $e')),
+        );
+      }
+    } finally {
+      if (mounted) {
         setState(() {
-          _errorMessage = 'Error loading data: $e';
           _isLoading = false;
         });
       }
     }
   }
 
-  Future<void> _searchUsers(String email) async {
-    if (email.isEmpty) {
-      _loadData();
+  Future<void> _searchUsers() async {
+    if (_searchQuery.isEmpty) {
+      await _loadData();
       return;
     }
 
     setState(() {
       _isLoading = true;
-      _errorMessage = '';
     });
 
     try {
-      final users = await AdminDashboardService.searchUsersByEmail(email);
-      if (mounted) {
-        setState(() {
-          _users = users;
-          _isLoading = false;
-        });
-      }
+      final results = await AdminDashboardService.searchUsers(_searchQuery);
+      setState(() {
+        _users = results;
+      });
     } catch (e) {
-      if (mounted) {
-        setState(() {
-          _errorMessage = 'Failed to search users: $e';
-          _isLoading = false;
-        });
-      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error searching users: $e')),
+      );
+    } finally {
+      setState(() {
+        _isLoading = false;
+      });
     }
   }
 
-  Future<void> _assignQRCode(int userId) async {
-    final TextEditingController qrCodeController = TextEditingController();
+  Future<void> _generateQRCodes() async {
+    final TextEditingController countController = TextEditingController(text: '1');
     
-    final qrCode = await showDialog<String>(
+    final count = await showDialog<int>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Assign QR Code'),
+        title: const Text('Generate QR Codes'),
         content: TextField(
-          controller: qrCodeController,
+          controller: countController,
+          keyboardType: TextInputType.number,
           decoration: const InputDecoration(
-            labelText: 'Enter QR Code',
-            hintText: 'e.g., IMMY-2025-123456',
+            labelText: 'Number of QR codes to generate',
           ),
-          onSubmitted: (value) => Navigator.pop(context, value),
         ),
         actions: [
           TextButton(
@@ -139,123 +117,114 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             child: const Text('Cancel'),
           ),
           TextButton(
-            onPressed: () => Navigator.pop(context, qrCodeController.text),
-            child: const Text('Assign'),
+            onPressed: () {
+              final count = int.tryParse(countController.text);
+              Navigator.pop(context, count);
+            },
+            child: const Text('Generate'),
           ),
         ],
       ),
     );
 
-    if (qrCode != null && qrCode.isNotEmpty) {
-      try {
-        await AdminDashboardService.assignQRCodeToUser(userId, qrCode);
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('QR Code assigned successfully')),
-          );
-          _loadData();
-        }
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Failed to assign QR Code: $e')),
-          );
-        }
+    if (count == null || count <= 0) return;
+
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      final serials = await AdminDashboardService.generateSerialNumbers(count);
+      await _loadData();
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Generated $count QR codes successfully')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error generating QR codes: $e')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
       }
     }
   }
 
-  Future<void> _showEditUserDialog(Map<String, dynamic> user) async {
-    final nameController = TextEditingController(text: user['name']?.toString() ?? '');
-    final emailController = TextEditingController(text: user['email']?.toString() ?? '');
-    
-    // Default to false since we may not have this field
-    bool isAdmin = false;
-    
-    // Try to get admin status from auth service if possible
+  Future<void> _assignQRCode(Map<String, dynamic> user) async {
+    setState(() {
+      _isLoading = true;
+    });
+
     try {
-      final userDetails = await widget.authService.getUserById(user['id']);
-      if (!mounted) return;
-      if (userDetails != null && userDetails['is_admin'] != null) {
-        isAdmin = userDetails['is_admin'] == true;
+      // Get available QR codes
+      final availableQRCodes = await AdminDashboardService.getAvailableQRCodes();
+      
+      setState(() {
+        _isLoading = false;
+      });
+      
+      if (availableQRCodes.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No QR codes available for assignment')),
+        );
+        return;
+      }
+
+      final qrCode = await showDialog<Map<String, dynamic>>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Assign QR Code'),
+          content: DropdownButtonFormField<Map<String, dynamic>>(
+            decoration: const InputDecoration(
+              labelText: 'Select QR Code',
+            ),
+            items: availableQRCodes.map((qr) {
+              return DropdownMenuItem<Map<String, dynamic>>(
+                value: qr,
+                child: Text(qr['serial']),
+              );
+            }).toList(),
+            onChanged: (value) => Navigator.pop(context, value),
+          ),
+        ),
+      );
+
+      if (qrCode == null) return;
+
+      setState(() {
+        _isLoading = true;
+      });
+
+      await AdminDashboardService.assignQRCodeToUser(
+        user['id'],
+        qrCode['serial'],
+      );
+      
+      await _loadData();
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('QR code assigned successfully')),
+        );
       }
     } catch (e) {
-      debugPrint('Could not fetch admin status: $e');
-    }
-
-    if (!mounted) return;
-    final result = await showDialog<Map<String, dynamic>?>(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setState) => AlertDialog(
-          title: const Text('Edit User'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: nameController,
-                decoration: const InputDecoration(
-                  labelText: 'Name',
-                ),
-              ),
-              TextField(
-                controller: emailController,
-                decoration: const InputDecoration(
-                  labelText: 'Email',
-                ),
-                keyboardType: TextInputType.emailAddress,
-              ),
-              SwitchListTile(
-                title: const Text('Admin User'),
-                value: isAdmin,
-                onChanged: (value) {
-                  setState(() {
-                    isAdmin = value;
-                  });
-                },
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
-            TextButton(
-              onPressed: () {
-                if (nameController.text.isNotEmpty && emailController.text.isNotEmpty) {
-                  Navigator.pop(context, {
-                    'name': nameController.text,
-                    'email': emailController.text,
-                    'is_admin': isAdmin,
-                  });
-                }
-              },
-              child: const Text('Save'),
-            ),
-          ],
-        ),
-      ),
-    );
-
-    if (result != null) {
-      try {
-        await AdminDashboardService.updateUserProfile(
-          user['id'],
-          result['name']!,
-          result['email']!,
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error assigning QR code: $e')),
         );
-        await AdminDashboardService.setUserAdmin(
-          user['id'],
-          result['is_admin']!,
-        );
-        _loadData();
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Error: $e')),
-          );
-        }
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
       }
     }
   }
@@ -325,211 +294,213 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     }
   }
 
-  Future<void> _showEditUserDialog(Map<String, dynamic> user) async {
-    final nameController = TextEditingController(text: user['name']?.toString() ?? '');
-    final emailController = TextEditingController(text: user['email']?.toString() ?? '');
-    
-    // Default to false since we may not have this field
-    bool isAdmin = false;
-    
-    // Try to get admin status from auth service if possible
+  Future<void> _assignQRCode(Map<String, dynamic> user) async {
+    setState(() {
+      _isLoading = true;
+    });
+
     try {
-      final userDetails = await widget.authService.getUserById(user['id']);
-      if (!mounted) return;
-      if (userDetails != null && userDetails['is_admin'] != null) {
-        isAdmin = userDetails['is_admin'] == true;
+      // Get available QR codes
+      final availableQRCodes = await AdminDashboardService.getAvailableQRCodes();
+      
+      setState(() {
+        _isLoading = false;
+      });
+      
+      if (availableQRCodes.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No QR codes available for assignment')),
+        );
+        return;
+      }
+
+      final qrCode = await showDialog<Map<String, dynamic>>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Assign QR Code'),
+          content: DropdownButtonFormField<Map<String, dynamic>>(
+            decoration: const InputDecoration(
+              labelText: 'Select QR Code',
+            ),
+            items: availableQRCodes.map((qr) {
+              return DropdownMenuItem<Map<String, dynamic>>(
+                value: qr,
+                child: Text(qr['serial']),
+              );
+            }).toList(),
+            onChanged: (value) => Navigator.pop(context, value),
+          ),
+        ),
+      );
+
+      if (qrCode == null) return;
+
+      setState(() {
+        _isLoading = true;
+      });
+
+      await AdminDashboardService.assignQRCodeToUser(
+        user['id'],
+        qrCode['serial'],
+      );
+      
+      await _loadData();
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('QR code assigned successfully')),
+        );
       }
     } catch (e) {
-      debugPrint('Could not fetch admin status: $e');
-    }
-
-    if (!mounted) return;
-    final result = await showDialog<Map<String, dynamic>?>(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setState) => AlertDialog(
-          title: const Text('Edit User'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: nameController,
-                decoration: const InputDecoration(
-                  labelText: 'Name',
-                ),
-              ),
-              TextField(
-                controller: emailController,
-                decoration: const InputDecoration(
-                  labelText: 'Email',
-                ),
-                keyboardType: TextInputType.emailAddress,
-              ),
-              SwitchListTile(
-                title: const Text('Admin User'),
-                value: isAdmin,
-                onChanged: (value) {
-                  setState(() {
-                    isAdmin = value;
-                  });
-                },
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
-            TextButton(
-              onPressed: () {
-                if (nameController.text.isNotEmpty && emailController.text.isNotEmpty) {
-                  Navigator.pop(context, {
-                    'name': nameController.text,
-                    'email': emailController.text,
-                    'is_admin': isAdmin,
-                  });
-                }
-              },
-              child: const Text('Save'),
-            ),
-          ],
-        ),
-      ),
-    );
-
-    if (result != null) {
-      try {
-        await AdminDashboardService.updateUserProfile(
-          user['id'],
-          result['name']!,
-          result['email']!,
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error assigning QR code: $e')),
         );
-        await AdminDashboardService.setUserAdmin(
-          user['id'],
-          result['is_admin']!,
-        );
-        _loadData();
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Error: $e')),
-          );
-        }
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
       }
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_errorMessage.isNotEmpty) {
-      return Scaffold(
+    return DefaultTabController(
+      length: 2,
+      child: Scaffold(
         appBar: AppBar(
           title: const Text('Admin Dashboard'),
-        ),
-        body: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text(
-                _errorMessage,
-                style: const TextStyle(color: Colors.red),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 20),
-              ElevatedButton(
-                onPressed: () {
-                  Navigator.of(context).pushReplacementNamed('/login');
-                },
-                child: const Text('Back to Login'),
-              ),
+          bottom: const TabBar(
+            tabs: [
+              Tab(text: 'Users'),
+              Tab(text: 'QR Codes'),
             ],
           ),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.qr_code),
+              onPressed: _generateQRCodes,
+              tooltip: 'Generate QR Codes',
+            ),
+            IconButton(
+              icon: const Icon(Icons.refresh),
+              onPressed: _loadData,
+              tooltip: 'Refresh',
+            ),
+          ],
         ),
-      );
-    }
-
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Admin Dashboard'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _loadData,
-          ),
-        ],
-      ),
-      body: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: TextField(
-              controller: _searchController,
-              decoration: InputDecoration(
-                labelText: 'Search by Email',
-                suffixIcon: IconButton(
-                  icon: const Icon(Icons.search),
-                  onPressed: () => _searchUsers(_searchController.text),
-                ),
+        body: _isLoading
+            ? const Center(child: CircularProgressIndicator())
+            : TabBarView(
+                children: [
+                  _buildUsersTab(),
+                  _buildQRCodesTab(),
+                ],
               ),
-              onSubmitted: _searchUsers,
-            ),
-          ),
-          if (_isLoading)
-            const Expanded(
-              child: Center(
-                child: CircularProgressIndicator(),
-              ),
-            )
-          else
-            Expanded(
-              child: ListView.builder(
-                itemCount: _users.length,
-                itemBuilder: (context, index) {
-                  final user = _users[index];
-                  return Card(
-                    margin: const EdgeInsets.symmetric(
-                      horizontal: 16.0,
-                      vertical: 8.0,
-                    ),
-                    child: ListTile(
-                      title: Text(user['name']?.toString() ?? 'N/A'),
-                      subtitle: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('Email: ${user['email']}'),
-                          if (user['qr_code'] != null)
-                            Text(
-                              'QR Code: ${user['qr_code']} (${user['qr_status']})',
-                              style: TextStyle(
-                                color: user['qr_status'] == 'active'
-                                    ? Colors.green
-                                    : Colors.red,
-                              ),
-                            ),
-                        ],
-                      ),
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          if (user['qr_code'] == null)
-                            TextButton(
-                              onPressed: () => _assignQRCode(user['id']),
-                              child: const Text('Assign QR'),
-                            ),
-                          IconButton(
-                            icon: const Icon(Icons.edit),
-                            onPressed: () => _showEditUserDialog(user),
-                          ),
-                        ],
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ),
-        ],
       ),
     );
   }
+
+  Widget _buildUsersTab() {
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.all(8.0),
+          child: TextField(
+            decoration: const InputDecoration(
+              labelText: 'Search users',
+              prefixIcon: Icon(Icons.search),
+            ),
+            onChanged: (value) {
+              setState(() {
+                _searchQuery = value;
+              });
+              _searchUsers();
+            },
+          ),
+        ),
+        Expanded(
+          child: ListView.builder(
+            itemCount: _users.length,
+            itemBuilder: (context, index) {
+              final user = _users[index];
+              return Card(
+                margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                child: ListTile(
+                  title: Text(user['name'] ?? 'No name'),
+                  subtitle: Text(user['email'] ?? 'No email'),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (user['qr_code'] != null)
+                        IconButton(
+                          icon: const Icon(Icons.qr_code),
+                          onPressed: () {
+                            // Show QR code details
+                          },
+                          tooltip: 'View QR Code',
+                        )
+                      else
+                        IconButton(
+                          icon: const Icon(Icons.add_box),
+                          onPressed: () => _assignQRCode(user),
+                          tooltip: 'Assign QR Code',
+                        ),
+                      IconButton(
+                        icon: const Icon(Icons.edit),
+                        onPressed: () {
+                          // Edit user
+                        },
+                        tooltip: 'Edit User',
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildQRCodesTab() {
+    return ListView.builder(
+      itemCount: _qrCodes.length,
+      itemBuilder: (context, index) {
+        final qrCode = _qrCodes[index];
+        return Card(
+          margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          child: ListTile(
+            title: Text(qrCode['serial'] ?? 'No serial'),
+            subtitle: Text(qrCode['assigned_to_name'] ?? 'Not assigned'),
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.qr_code),
+                  onPressed: () {
+                    // Show QR code
+                  },
+                  tooltip: 'View QR Code',
+                ),
+                if (qrCode['assigned_to_name'] == null)
+                  IconButton(
+                    icon: const Icon(Icons.person_add),
+                    onPressed: () {
+                      // Assign to user
+                    },
+                    tooltip: 'Assign to User',
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
 }
+

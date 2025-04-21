@@ -25,23 +25,23 @@ import 'services/auth_service.dart' as admin_auth;
 import 'services/users_auth_service.dart' as user_auth;
 import 'services/backend_api_service.dart'; 
 
-Future<void> main() async {
+void main() async {
   // Ensure Flutter is initialized
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // Initialize database connection
+  try {
+    await BackendApiService.initialize();
+    print('Database connection initialized successfully');
+  } catch (e) {
+    print('Error initializing database connection: $e');
+  }
   
   // Initialize services
   final serialService = SerialService();
   final apiService = ApiService();
   final adminAuthService = admin_auth.AuthService();
   final userAuthService = user_auth.AuthService();
-  
-  // Initialize database
-  try {
-    await BackendApiService.initializeDatabase();
-    debugPrint('Database initialized successfully');
-  } catch (e) {
-    debugPrint('Error initializing database: $e');
-  }
   
   // Initialize admin users
   await adminAuthService.initializeAdminUser();
@@ -55,101 +55,7 @@ Future<void> main() async {
   ));
 }
 
-// Wrapper for admin-only screens
-class AdminRouteGuard extends StatelessWidget {
-  final Widget child;
-  final admin_auth.AuthService authService;
-
-  const AdminRouteGuard({
-    Key? key,
-    required this.child,
-    required this.authService,
-  }) : super(key: key);
-
-  @override
-  Widget build(BuildContext context) {
-    return FutureBuilder<bool>(
-      future: authService.isCurrentUserAdmin(),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Scaffold(
-            body: Center(
-              child: CircularProgressIndicator(),
-            ),
-          );
-        }
-
-        final isAdmin = snapshot.data ?? false;
-        if (!isAdmin) {
-          // Return to login page if not admin
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Access denied: Admin privileges required')),
-            );
-            Navigator.of(context).pushReplacementNamed('/admin/login');
-          });
-          return const Scaffold(
-            body: Center(
-              child: Text('Access denied. Redirecting to login...'),
-            ),
-          );
-        }
-
-        // User is admin, show the protected screen
-        return child;
-      },
-    );
-  }
-}
-
-// Wrapper for admin-only screens
-class AdminRouteGuard extends StatelessWidget {
-  final Widget child;
-  final admin_auth.AuthService authService;
-
-  const AdminRouteGuard({
-    Key? key,
-    required this.child,
-    required this.authService,
-  }) : super(key: key);
-
-  @override
-  Widget build(BuildContext context) {
-    return FutureBuilder<bool>(
-      future: authService.isCurrentUserAdmin(),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Scaffold(
-            body: Center(
-              child: CircularProgressIndicator(),
-            ),
-          );
-        }
-
-        final isAdmin = snapshot.data ?? false;
-        if (!isAdmin) {
-          // Return to login page if not admin
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Access denied: Admin privileges required')),
-            );
-            Navigator.of(context).pushReplacementNamed('/admin/login');
-          });
-          return const Scaffold(
-            body: Center(
-              child: Text('Access denied. Redirecting to login...'),
-            ),
-          );
-        }
-
-        // User is admin, show the protected screen
-        return child;
-      },
-    );
-  }
-}
-
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   final SerialService serialService;
   final ApiService apiService;
   final admin_auth.AuthService authService;
@@ -159,8 +65,38 @@ class MyApp extends StatelessWidget {
     super.key, 
     required this.serialService,
     required this.apiService,
-    required this.authService, required this.usersAuthService,
+    required this.authService,
+    required this.usersAuthService,
   });
+
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    // Register the observer to listen for app lifecycle changes
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    // Unregister the observer
+    WidgetsBinding.instance.removeObserver(this);
+    // Close database connection
+    BackendApiService.close();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.detached) {
+      // Close database connection when app is terminated
+      BackendApiService.close();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -172,38 +108,58 @@ class MyApp extends StatelessWidget {
       title: 'Immy App',
       theme: ThemeData(
         primarySwatch: Colors.purple,
-        visualDensity: VisualDensity.adaptivePlatformDensity,
+        primaryColor: const Color(0xFF8B5CF6), // purple-600
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color(0xFF8B5CF6),
+          primary: const Color(0xFF8B5CF6),
+        ),
+        scaffoldBackgroundColor: const Color(0xFFF9FAFB), // gray-50
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Color(0xFF8B5CF6), // purple-600
+          foregroundColor: Colors.white,
+        ),
+        cardTheme: CardTheme(
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+            side: const BorderSide(color: Color(0xFFE5E7EB)), // gray-200
+          ),
+        ),
+        useMaterial3: true,
       ),
-      initialRoute: '/',
       routes: {
         '/': (context) => const SplashScreen(),
         '/login': (context) => const LoginScreen(),
         '/register': (context) => const RegisterScreen(),
         '/home': (context) => HomePage(
-              serialService: serialService,
-              apiService: apiService,
-              authService: authService,
-              usersAuthService: usersAuthService,
+              serialService: widget.serialService,
+              apiService: widget.apiService,
+              authService: widget.authService,
+              usersAuthService: widget.usersAuthService,
             ),
         '/terms': (context) => const TermsOfServicePage(),
         '/serial-management': (context) => SerialManagementScreen(
-              serialService: serialService,
+              serialService: widget.serialService,
             ),
         '/serial-lookup': (context) => SerialLookupScreen(
-              serialService: serialService,
+              serialService: widget.serialService,
             ),
         '/admin/login': (context) => AdminLoginScreen(
-              authService: adminAuthService,
+              authService: widget.authService,
             ),
-        '/admin/dashboard': (context) => AdminRouteGuard(
-              authService: authService,
-              child: AdminDashboardScreen(
-                serialService: serialService,
-                authService: authService,
-              ),
+        '/admin/dashboard': (context) => AdminDashboardScreen(
+              serialService: widget.serialService,
+              authService: widget.authService,
             ),
-        '/admin-setup': (context) => AdminSetupScreen(
-              authService: adminAuthService,
+        '/recent-conversations': (context) => RecentConversationsScreen(
+              apiService: widget.apiService,
+              authService: widget.authService,
+            ),
+        '/scan-qr-code': (context) => QrScannerScreen(
+              serialService: widget.serialService,
+            ),
+        '/device-management': (context) => DeviceManagementScreen(
+              serialService: widget.serialService,
             ),
       },
     );
@@ -246,8 +202,6 @@ class _SplashScreenState extends State<SplashScreen> {
         final prefs = await SharedPreferences.getInstance();
         final bool termsAccepted = prefs.getBool('terms_accepted') ?? false;
         
-        if (!mounted) return;
-        
         if (termsAccepted) {
           // User has already accepted terms, go directly to home page
           Navigator.of(context).pushReplacementNamed('/home');
@@ -257,7 +211,6 @@ class _SplashScreenState extends State<SplashScreen> {
         }
       } else {
         // User is not logged in, go to login page
-        if (!mounted) return;
         Navigator.of(context).pushReplacementNamed('/login');
       }
     } catch (e) {

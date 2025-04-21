@@ -1,0 +1,303 @@
+import 'dart:convert';
+import 'dart:io';
+import 'package:crypto/crypto.dart';
+import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
+import '../services/backend_api_service.dart';
+import '../services/stripe_service.dart';
+
+class WebhookHandler {
+  static const String _endpointSecret = ''; // Add your webhook secret here
+  
+  // Handle Stripe webhook events
+  static Future<Map<String, dynamic>> handleWebhook(
+    String payload,
+    String signature,
+  ) async {
+    try {
+      // Verify webhook signature
+      if (!kIsWeb && _endpointSecret.isNotEmpty) {
+        _verifySignature(payload, signature);
+      }
+      
+      // Parse event
+      final event = jsonDecode(payload);
+      final eventType = event['type'];
+      
+      print('Processing webhook: $eventType');
+      
+      // Handle different event types
+      switch (eventType) {
+        case 'payment_intent.succeeded':
+          await _handlePaymentIntentSucceeded(event['data']['object']);
+          break;
+        case 'payment_intent.payment_failed':
+          await _handlePaymentIntentFailed(event['data']['object']);
+          break;
+        case 'customer.subscription.created':
+          await _handleSubscriptionCreated(event['data']['object']);
+          break;
+        case 'customer.subscription.updated':
+          await _handleSubscriptionUpdated(event['data']['object']);
+          break;
+        case 'customer.subscription.deleted':
+          await _handleSubscriptionDeleted(event['data']['object']);
+          break;
+        case 'invoice.payment_succeeded':
+          await _handleInvoicePaymentSucceeded(event['data']['object']);
+          break;
+        case 'invoice.payment_failed':
+          await _handleInvoicePaymentFailed(event['data']['object']);
+          break;
+      }
+      
+      return {'received': true};
+    } catch (e) {
+      print('Error handling webhook: $e');
+      throw Exception('Webhook error: $e');
+    }
+  }
+  
+  // Verify webhook signature
+  static void _verifySignature(String payload, String signature) {
+    try {
+      final List<String> signatureParts = signature.split(',');
+      String timestampPart = '';
+      String signaturePart = '';
+      
+      for (final part in signatureParts) {
+        if (part.startsWith('t=')) {
+          timestampPart = part.substring(2);
+        } else if (part.startsWith('v1=')) {
+          signaturePart = part.substring(3);
+        }
+      }
+      
+      if (timestampPart.isEmpty || signaturePart.isEmpty) {
+        throw Exception('Invalid signature format');
+      }
+      
+      final signedPayload = '$timestampPart.$payload';
+      final hmac = Hmac(sha256, utf8.encode(_endpointSecret));
+      final digest = hmac.convert(utf8.encode(signedPayload));
+      final computedSignature = digest.toString();
+      
+      if (computedSignature != signaturePart) {
+        throw Exception('Signature verification failed');
+      }
+    } catch (e) {
+      print('Signature verification failed: $e');
+      throw Exception('Webhook signature verification failed: $e');
+    }
+  }
+  
+  // Handle payment_intent.succeeded event
+  static Future<void> _handlePaymentIntentSucceeded(Map<String, dynamic> paymentIntent) async {
+    try {
+      final metadata = paymentIntent['metadata'] ?? {};
+      final userId = int.tryParse(metadata['user_id']?.toString() ?? '');
+      final serialId = int.tryParse(metadata['serial_id']?.toString() ?? '');
+      
+      if (userId == null || serialId == null) {
+        print('Missing user_id or serial_id in payment intent metadata');
+        return;
+      }
+      
+      // Update payment status in database
+      final payments = await BackendApiService.executeQuery(
+        'SELECT * FROM Payments WHERE stripe_payment_id = ?',
+        [paymentIntent['id']]
+      );
+      
+      if (payments.isNotEmpty) {
+        await BackendApiService.executeQuery(
+          'UPDATE Payments SET payment_status = ? WHERE stripe_payment_id = ?',
+          ['completed', paymentIntent['id']]
+        );
+      } else {
+        // Create payment record if it doesn't exist
+        final amount = paymentIntent['amount'] / 100.0;
+        final currency = paymentIntent['currency'];
+        
+        await BackendApiService.executeInsert(
+          'INSERT INTO Payments (user_id, serial_id, amount, currency, payment_status, stripe_payment_id) VALUES (?, ?, ?, ?, ?, ?)',
+          [userId, serialId, amount, currency, 'completed', paymentIntent['id']]
+        );
+      }
+      
+      // Create subscription if it doesn't exist
+      final subscriptions = await BackendApiService.executeQuery(
+        'SELECT * FROM Subscriptions WHERE user_id = ? AND serial_id = ? AND status = ?',
+        [userId, serialId, 'active']
+      );
+      
+      if (subscriptions.isEmpty) {
+        final endDate = DateTime.now().add(const Duration(days: 30));
+        await BackendApiService.createSubscription(userId, serialId, endDate);
+      }
+    } catch (e) {
+      print('Error handling payment_intent.succeeded: $e');
+    }
+  }
+  
+  // Handle payment_intent.payment_failed event
+  static Future<void> _handlePaymentIntentFailed(Map<String, dynamic> paymentIntent) async {
+    try {
+      // Update payment status in database
+      await BackendApiService.executeQuery(
+        'UPDATE Payments SET payment_status = ? WHERE stripe_payment_id = ?',
+        ['failed', paymentIntent['id']]
+      );
+    } catch (e) {
+      print('Error handling payment_intent.payment_failed: $e');
+    }
+  }
+  
+  // Handle customer.subscription.created event
+  static Future<void> _handleSubscriptionCreated(Map<String, dynamic> subscription) async {
+    try {
+      final customerId = subscription['customer'];
+      
+      // Find user with this Stripe customer ID
+      final users = await BackendApiService.executeQuery(
+        'SELECT * FROM Users WHERE stripe_customer_id = ?',
+        [customerId]
+      );
+      
+      if (users.isEmpty) {
+        print('No user found with Stripe customer ID: $customerId');
+        return;
+      }
+      
+      final userId = users.first['id'];
+      
+      // Get user's serial numbers
+      final serials = await BackendApiService.executeQuery(
+        'SELECT * FROM SerialNumbers WHERE user_id = ?',
+        [userId]
+      );
+      
+      if (serials.isEmpty) {
+        print('No serial numbers found for user ID: $userId');
+        return;
+      }
+      
+      // Create subscription for each serial number
+      final endDate = DateTime.fromMillisecondsSinceEpoch(
+        subscription['current_period_end'] * 1000
+      );
+      
+      for (final serial in serials) {
+        await BackendApiService.executeQuery(
+          'INSERT INTO Subscriptions (user_id, serial_id, end_date, status, stripe_subscription_id) VALUES (?, ?, ?, ?, ?)',
+          [userId, serial['id'], endDate.toIso8601String(), 'active', subscription['id']]
+        );
+      }
+    } catch (e) {
+      print('Error handling customer.subscription.created: $e');
+    }
+  }
+  
+  // Handle customer.subscription.updated event
+  static Future<void> _handleSubscriptionUpdated(Map<String, dynamic> subscription) async {
+    try {
+      final status = subscription['status'];
+      
+      // Update subscription status in database
+      await BackendApiService.executeQuery(
+        'UPDATE Subscriptions SET status = ? WHERE stripe_subscription_id = ?',
+        [status, subscription['id']]
+      );
+      
+      // If subscription is active, update end date
+      if (status == 'active') {
+        final endDate = DateTime.fromMillisecondsSinceEpoch(
+          subscription['current_period_end'] * 1000
+        );
+        
+        await BackendApiService.executeQuery(
+          'UPDATE Subscriptions SET end_date = ? WHERE stripe_subscription_id = ?',
+          [endDate.toIso8601String(), subscription['id']]
+        );
+      }
+    } catch (e) {
+      print('Error handling customer.subscription.updated: $e');
+    }
+  }
+  
+  // Handle customer.subscription.deleted event
+  static Future<void> _handleSubscriptionDeleted(Map<String, dynamic> subscription) async {
+    try {
+      // Update subscription status in database
+      await BackendApiService.executeQuery(
+        'UPDATE Subscriptions SET status = ? WHERE stripe_subscription_id = ?',
+        ['canceled', subscription['id']]
+      );
+    } catch (e) {
+      print('Error handling customer.subscription.deleted: $e');
+    }
+  }
+  
+  // Handle invoice.payment_succeeded event
+  static Future<void> _handleInvoicePaymentSucceeded(Map<String, dynamic> invoice) async {
+    try {
+      final subscriptionId = invoice['subscription'];
+      final customerId = invoice['customer'];
+      if (subscriptionId == null) return;
+      
+      // Get subscription details from Stripe
+      final subscription = await StripeService.handleResponse(
+        await http.get(
+          Uri.parse('${StripeService.baseUrl}/subscriptions/$subscriptionId'),
+          headers: StripeService.headers,
+        )
+      );
+      
+      final endDate = DateTime.fromMillisecondsSinceEpoch(
+        subscription['current_period_end'] * 1000
+      );
+      
+      // Update subscription status and end date in database
+      await BackendApiService.executeQuery(
+        'UPDATE Subscriptions SET status = ?, end_date = ? WHERE stripe_subscription_id = ?',
+        ['active', endDate.toIso8601String(), subscriptionId]
+      );
+
+      // Create payment record
+      final amount = invoice['amount_paid'] / 100.0;
+      final currency = invoice['currency'];
+      
+      // Get user ID from customer ID
+      final users = await BackendApiService.executeQuery(
+        'SELECT id FROM Users WHERE stripe_customer_id = ?',
+        [customerId]
+      );
+      
+      if (users.isNotEmpty) {
+        final userId = users.first['id'];
+        await BackendApiService.executeInsert(
+          'INSERT INTO Payments (user_id, amount, currency, payment_status, stripe_payment_id) VALUES (?, ?, ?, ?, ?)',
+          [userId, amount, currency, 'completed', invoice['payment_intent']]
+        );
+      }
+    } catch (e) {
+      print('Error handling invoice.payment_succeeded: $e');
+    }
+  }
+  
+  // Handle invoice.payment_failed event
+  static Future<void> _handleInvoicePaymentFailed(Map<String, dynamic> invoice) async {
+    try {
+      final subscriptionId = invoice['subscription'];
+      if (subscriptionId == null) return;
+      
+      // Update subscription status in database
+      await BackendApiService.executeQuery(
+        'UPDATE Subscriptions SET status = ? WHERE stripe_subscription_id = ?',
+        ['past_due', subscriptionId]
+      );
+    } catch (e) {
+      print('Error handling invoice.payment_failed: $e');
+    }
+  }
+}

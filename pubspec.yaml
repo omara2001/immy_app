@@ -22,6 +22,8 @@ dependencies:
   mobile_scanner: ^3.5.5  # Added for QR code scanning
   mysql1: ^0.20.0 #Added for MySQL database connection
   provider: ^6.0.5
+  flutter_stripe: ^11.5.0
+  shelf_router: ^1.1.4
 
 dev_dependencies:
   flutter_test:

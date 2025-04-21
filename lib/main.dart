@@ -1,20 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:convert';
-import 'models/user_profile.dart';
-import 'models/user.dart';
-import 'services/serial_service.dart';
-import 'services/api_service.dart';
-import 'services/auth_service.dart' as admin_auth;
-import 'services/users_auth_service.dart' as user_auth;
-import 'screens/splash_screen.dart';
+import 'screens/register_screen.dart';
 import 'screens/terms_of_service_page.dart';
 import 'screens/home_page.dart';
 import 'screens/serial_management_screen.dart';
 import 'screens/serial_lookup_screen.dart';
 import 'screens/admin_login_screen.dart';
 import 'screens/admin_dashboard_screen.dart';
-import 'screens/admin_setup_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/recent_conversations_screen.dart';
 import 'screens/qr_scanner_screen.dart';
@@ -24,12 +16,23 @@ import 'services/api_service.dart';
 import 'services/auth_service.dart' as admin_auth;
 import 'services/users_auth_service.dart' as user_auth;
 import 'services/backend_api_service.dart'; 
-
+import 'package:flutter_stripe/flutter_stripe.dart';
+import 'services/stripe_service.dart';
+import 'screens/payment_screen.dart';
+import 'screens/subscription_screen.dart';
 void main() async {
   // Ensure Flutter is initialized
   WidgetsFlutterBinding.ensureInitialized();
   
   // Initialize database connection
+  Stripe.publishableKey = 'pk_test_your_publishable_key'; // Replace with your Stripe publishable key
+  await Stripe.instance.applySettings();
+  
+  // Initialize Stripe service
+  StripeService.initialize(
+    secretKey: 'sk_test_your_secret_key', // Replace with your Stripe secret key
+    publishableKey: Stripe.publishableKey,
+  );
   try {
     await BackendApiService.initialize();
     print('Database connection initialized successfully');
@@ -100,10 +103,6 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    // Initialize services
-    final serialService = SerialService();
-    final apiService = ApiService();
-
     return MaterialApp(
       title: 'Immy App',
       theme: ThemeData(
@@ -161,7 +160,22 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         '/device-management': (context) => DeviceManagementScreen(
               serialService: widget.serialService,
             ),
+        '/payment': (context) {
+          final args = ModalRoute.of(context)!.settings.arguments as Map<String, dynamic>;
+          return PaymentScreen(
+            userId: args['userId'],
+            serialId: args['serialId'],
+          );
+        },
+        '/subscription': (context) {
+          final args = ModalRoute.of(context)!.settings.arguments as Map<String, dynamic>;
+          return SubscriptionScreen(
+            userId: args['userId'],
+          );
+        },
       },
+      initialRoute: '/',
+      debugShowCheckedModeBanner: false,
     );
   }
 }
@@ -170,7 +184,7 @@ class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
 
   @override
-  _SplashScreenState createState() => _SplashScreenState();
+  State<SplashScreen> createState() => _SplashScreenState();
 }
 
 class _SplashScreenState extends State<SplashScreen> {
@@ -185,15 +199,12 @@ class _SplashScreenState extends State<SplashScreen> {
   Future<void> _checkAuthStatus() async {
     // Simulate a splash screen delay
     await Future.delayed(const Duration(seconds: 2));
-
+    
     if (!mounted) return;
-
-    final userAuth = user_auth.AuthService();
-    final isLoggedIn = await userAuth.isLoggedIn();
-
-    if (isLoggedIn) {
-      // Check if user is admin
-      final isAdmin = await userAuth.isCurrentUserAdmin();
+    
+    try {
+      // Check if user is logged in
+      final isLoggedIn = await usersAuthService.isLoggedIn();
       
       if (!mounted) return;
       
@@ -224,40 +235,17 @@ class _SplashScreenState extends State<SplashScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF8B5CF6), // purple-600
+      backgroundColor: Theme.of(context).primaryColor,
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // Logo or app icon
-            Container(
-              width: 120,
-              height: 120,
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: const Center(
-                child: Text(
-                  'IA',
-                  style: TextStyle(
-                    color: Color(0xFF8B5CF6), // purple-600
-                    fontSize: 48,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
+            Image.asset(
+              'assets/immy_BrainyBear.png',
+              width: 150,
+              height: 150,
             ),
             const SizedBox(height: 24),
-            const Text(
-              'Immy App',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 32,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 48),
             const CircularProgressIndicator(
               valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
             ),

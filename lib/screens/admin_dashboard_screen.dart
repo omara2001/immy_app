@@ -9,10 +9,10 @@ class AdminDashboardScreen extends StatefulWidget {
   final AuthService authService;
 
   const AdminDashboardScreen({
-    Key? key,
+    super.key,
     required this.serialService,
     required this.authService,
-  }) : super(key: key);
+  });
 
   @override
   State<AdminDashboardScreen> createState() => _AdminDashboardScreenState();

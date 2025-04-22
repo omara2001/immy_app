@@ -18,44 +18,78 @@ import 'services/users_auth_service.dart' as user_auth;
 import 'services/backend_api_service.dart'; 
 import 'package:flutter_stripe/flutter_stripe.dart';
 import 'services/stripe_service.dart';
-import 'screens/payment_screen.dart';
 import 'screens/subscription_screen.dart';
+import 'dart:async';
+import 'screens/conversation_detail_screen.dart';
+
 void main() async {
   // Ensure Flutter is initialized
   WidgetsFlutterBinding.ensureInitialized();
   
-  // Initialize database connection
-  Stripe.publishableKey = 'pk_test_your_publishable_key'; // Replace with your Stripe publishable key
-  await Stripe.instance.applySettings();
-  
-  // Initialize Stripe service
-  StripeService.initialize(
-    secretKey: 'sk_test_your_secret_key', // Replace with your Stripe secret key
-    publishableKey: Stripe.publishableKey,
-  );
-  try {
-    await BackendApiService.initialize();
-    print('Database connection initialized successfully');
-  } catch (e) {
-    print('Error initializing database connection: $e');
-  }
-  
-  // Initialize services
+  // Only initialize essential services for UI
   final serialService = SerialService();
   final apiService = ApiService();
   final adminAuthService = admin_auth.AuthService();
   final userAuthService = user_auth.AuthService();
   
-  // Initialize admin users
-  await adminAuthService.initializeAdminUser();
-  await userAuthService.initializeAdminUser();
+  // Initialize Stripe early
+  try {
+    Stripe.publishableKey = 'pk_test_51R00wJP1l4vbhTn5ncEmkHyXbk0Csb22wsmqYsYbAssUvPIsR3dldovfgPlqsZzcf3LtIhrOKqAVWITKfYR2fFx600KQdXd1p2';
+    
+    // Apply settings with platform-specific configuration
+    await Stripe.instance.applySettings();
+    
+    // Initialize Stripe service
+    StripeService.initialize(
+      secretKey: 'sk_test_51R00wJP1l4vbhTn5Xfe5zWNZrVtHyA7EeP1REpL92RXarOtVRelDEPPHBNdvEdhWRFMd66CWmOLd2cCI2ZF6aAls00jM6x0sdT',
+      publishableKey: Stripe.publishableKey,
+      testMode: true,
+    );
+    
+    print('Stripe initialized successfully in test mode');
+  } catch (e) {
+    print('Error initializing Stripe (will use mock data): $e');
+    // Initialize Stripe service in test mode anyway to ensure mocks work
+    StripeService.initialize(
+      secretKey: 'sk_test_mock',
+      publishableKey: 'pk_test_mock',
+      testMode: true,
+    );
+  }
   
+  // Start the app immediately
   runApp(MyApp(
     serialService: serialService,
     apiService: apiService,
     authService: adminAuthService, 
     usersAuthService: userAuthService,
   ));
+  
+  // Initialize database and other services in the background
+  Future.microtask(() async {
+    // Initialize BackendApiService first
+    try {
+      await BackendApiService.initialize();
+      print('Database connection initialized successfully');
+    } catch (e) {
+      print('Error initializing database connection: $e');
+    }
+    
+    // Initialize admin users
+    try {
+      await adminAuthService.initializeAdminUser();
+      print('Admin user initialized successfully');
+    } catch (e) {
+      print('Error initializing admin user: $e');
+    }
+    
+    try {
+      await userAuthService.initializeAdminUser();
+      print('User admin initialized successfully');
+    } catch (e) {
+      print('Error initializing user admin: $e');
+    }
+  });
 }
 
 class MyApp extends StatefulWidget {
@@ -160,17 +194,27 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         '/device-management': (context) => DeviceManagementScreen(
               serialService: widget.serialService,
             ),
-        '/payment': (context) {
-          final args = ModalRoute.of(context)!.settings.arguments as Map<String, dynamic>;
-          return PaymentScreen(
-            userId: args['userId'],
-            serialId: args['serialId'],
-          );
-        },
         '/subscription': (context) {
-          final args = ModalRoute.of(context)!.settings.arguments as Map<String, dynamic>;
+          final args = ModalRoute.of(context)!.settings.arguments as Map<String, dynamic>?;
+          if (args == null) {
+            // Handle case when no arguments are provided
+            return const Scaffold(
+              body: Center(
+                child: Text('Error: Missing subscription information'),
+              ),
+            );
+          }
           return SubscriptionScreen(
             userId: args['userId'],
+          );
+        },
+        // Keep conversation detail screen accessible via deep linking
+        '/conversation-detail': (context) {
+          final args = ModalRoute.of(context)!.settings.arguments as Map<String, dynamic>;
+          return ConversationDetailScreen(
+            apiService: widget.apiService,
+            conversationId: args['conversationId'],
+            authService: widget.authService,
           );
         },
       },
@@ -197,36 +241,75 @@ class _SplashScreenState extends State<SplashScreen> {
   }
 
   Future<void> _checkAuthStatus() async {
-    // Simulate a splash screen delay
-    await Future.delayed(const Duration(seconds: 2));
+    // Start loading the SharedPreferences early as it can be slow
+    final prefsCompleter = Completer<SharedPreferences>();
+    SharedPreferences.getInstance().then(
+      (prefs) => prefsCompleter.complete(prefs),
+      onError: (e) {
+        print('Error loading SharedPreferences: $e');
+        prefsCompleter.completeError(e);
+      }
+    );
+    
+    // Shorter splash screen delay
+    await Future.delayed(const Duration(seconds: 1));
     
     if (!mounted) return;
     
+    // Add a safety timeout to ensure the app doesn't hang
+    bool authCheckComplete = false;
+    
+    // Set up a safety timeout (reduced to 3 seconds)
+    Future.delayed(const Duration(seconds: 3), () {
+      if (!mounted || authCheckComplete) return;
+      print("Auth check timeout - defaulting to login screen");
+      Navigator.of(context).pushReplacementNamed('/login');
+    });
+    
     try {
-      // Check if user is logged in
-      final isLoggedIn = await usersAuthService.isLoggedIn();
-      
-      if (!mounted) return;
-      
-      if (isLoggedIn) {
-        // Check if terms are accepted
-        final prefs = await SharedPreferences.getInstance();
-        final bool termsAccepted = prefs.getBool('terms_accepted') ?? false;
-        
-        if (termsAccepted) {
-          // User has already accepted terms, go directly to home page
-          Navigator.of(context).pushReplacementNamed('/home');
-        } else {
-          // User is logged in but hasn't accepted terms
-          Navigator.of(context).pushReplacementNamed('/terms');
+      // Get SharedPreferences first
+      final prefs = await prefsCompleter.future.timeout(
+        const Duration(seconds: 2),
+        onTimeout: () {
+          print("SharedPreferences timeout");
+          throw TimeoutException("SharedPreferences timeout");
         }
-      } else {
-        // User is not logged in, go to login page
-        Navigator.of(context).pushReplacementNamed('/login');
+      );
+      
+      // Check if this is the first time the app is running
+      final firstRun = prefs.getBool('first_run') ?? true;
+      if (firstRun) {
+        print("First run detected, showing terms of service");
+        if (mounted) {
+          authCheckComplete = true;
+          // Save that we've shown terms of service but don't mark as accepted yet
+          await prefs.setBool('first_run', false);
+          Navigator.of(context).pushReplacementNamed('/terms');
+          return;
+        }
       }
+      
+      // Check if terms have been accepted
+      final termsAccepted = prefs.getBool('terms_accepted') ?? false;
+      if (!termsAccepted) {
+        print("Terms not accepted, showing terms of service");
+        if (mounted) {
+          authCheckComplete = true;
+          Navigator.of(context).pushReplacementNamed('/terms');
+          return;
+        }
+      }
+      
+      // For the initial flow, always force users to login after splash screen
+      // to ensure the correct authentication
+      authCheckComplete = true;
+      print("Routing to login screen from splash");
+      Navigator.of(context).pushReplacementNamed('/login');
     } catch (e) {
+      print('Error in splash screen: $e');
       // If there's an error, default to login page
-      if (mounted) {
+      if (mounted && !authCheckComplete) {
+        authCheckComplete = true;
         Navigator.of(context).pushReplacementNamed('/login');
       }
     }
@@ -244,6 +327,15 @@ class _SplashScreenState extends State<SplashScreen> {
               'assets/immy_BrainyBear.png',
               width: 150,
               height: 150,
+            ),
+            const SizedBox(height: 24),
+            const Text(
+              'Immy App',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 32,
+                fontWeight: FontWeight.bold,
+              ),
             ),
             const SizedBox(height: 24),
             const CircularProgressIndicator(

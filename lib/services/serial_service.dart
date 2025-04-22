@@ -15,7 +15,6 @@ import '../utils/password_util.dart'; // Make sure this path is correct
 import 'package:flutter/foundation.dart' show kIsWeb;
 
 // Conditional imports
-import 'dart:io' if (kIsWeb) 'dart:html' as html;
 
 class SerialService {
   static const String _userProfilesKey = 'user_profiles';

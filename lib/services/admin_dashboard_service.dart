@@ -1,13 +1,11 @@
 import 'package:flutter/foundation.dart';
 import 'backend_api_service.dart';
-import '../models/serial_number.dart';
-import '../models/user_profile.dart';
 import 'package:uuid/uuid.dart';
 import 'dart:math';
 
 class AdminDashboardService {
   static final _backendApi = BackendApiService();
-  static final _uuid = const Uuid();
+  static const _uuid = Uuid();
 
   // Helper method to check if assigned_at column exists
   static Future<bool> _hasAssignedAtColumn() async {

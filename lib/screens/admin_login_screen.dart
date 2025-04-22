@@ -5,9 +5,9 @@ class AdminLoginScreen extends StatefulWidget {
   final AuthService authService;
   
   const AdminLoginScreen({
-    Key? key,
+    super.key,
     required this.authService,
-  }) : super(key: key);
+  });
 
   @override
   _AdminLoginScreenState createState() => _AdminLoginScreenState();

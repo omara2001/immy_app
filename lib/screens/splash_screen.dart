@@ -2,6 +2,8 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/users_auth_service.dart' as user_auth;
+import 'dart:async';
+
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
 
@@ -10,6 +12,8 @@ class SplashScreen extends StatefulWidget {
 }
 
 class _SplashScreenState extends State<SplashScreen> {
+  final usersAuthService = user_auth.AuthService();
+  
   @override
   void initState() {
     super.initState();
@@ -17,38 +21,75 @@ class _SplashScreenState extends State<SplashScreen> {
   }
 
   Future<void> _checkAuthStatus() async {
-    // Simulate a splash screen delay
-    await Future.delayed(const Duration(seconds: 2));
+    // Start loading the SharedPreferences early as it can be slow
+    final prefsCompleter = Completer<SharedPreferences>();
+    SharedPreferences.getInstance().then(
+      (prefs) => prefsCompleter.complete(prefs),
+      onError: (e) {
+        print('Error loading SharedPreferences: $e');
+        prefsCompleter.completeError(e);
+      }
+    );
+    
+    // Shorter splash screen delay
+    await Future.delayed(const Duration(seconds: 1));
 
     if (!mounted) return;
+    
+    // Add a safety timeout to ensure the app doesn't hang
+    bool authCheckComplete = false;
+    
+    // Set up a safety timeout (reduced to 3 seconds)
+    Future.delayed(const Duration(seconds: 3), () {
+      if (!mounted || authCheckComplete) return;
+      print("Auth check timeout - defaulting to login screen");
+      Navigator.of(context).pushReplacementNamed('/login');
+    });
 
-    // Import the user_auth service
-    // You'll need to add this import at the top of the file
-    // import '../services/users_auth_service.dart' as user_auth;
-    final userAuth = user_auth.AuthService();
-    final isLoggedIn = await userAuth.isLoggedIn();
-
-    if (isLoggedIn) {
-      // Check if user is admin
-      final isAdmin = await userAuth.isCurrentUserAdmin();
+    try {
+      // Get SharedPreferences first
+      final prefs = await prefsCompleter.future.timeout(
+        const Duration(seconds: 2),
+        onTimeout: () {
+          print("SharedPreferences timeout");
+          throw TimeoutException("SharedPreferences timeout");
+        }
+      );
       
-      if (isAdmin) {
-        // If admin, go to admin dashboard
-        Navigator.of(context).pushReplacementNamed('/admin/dashboard');
-      } else {
-        // If regular user, go to home
-        Navigator.of(context).pushReplacementNamed('/home');
+      // Check if this is the first time the app is running
+      final firstRun = prefs.getBool('first_run') ?? true;
+      if (firstRun) {
+        print("First run detected, showing terms of service");
+        if (mounted) {
+          authCheckComplete = true;
+          // Save that we've shown terms of service but don't mark as accepted yet
+          await prefs.setBool('first_run', false);
+          Navigator.of(context).pushReplacementNamed('/terms');
+          return;
+        }
       }
-    } else {
-      // Not logged in, check if terms accepted
-      final prefs = await SharedPreferences.getInstance();
-      final bool termsAccepted = prefs.getBool('terms_accepted') ?? false;
-
+      
+      // Check if terms have been accepted
+      final termsAccepted = prefs.getBool('terms_accepted') ?? false;
       if (!termsAccepted) {
-        // First time user, show terms of service
-        Navigator.of(context).pushReplacementNamed('/terms');
-      } else {
-        // Terms accepted but not logged in, go to login
+        print("Terms not accepted, showing terms of service");
+        if (mounted) {
+          authCheckComplete = true;
+          Navigator.of(context).pushReplacementNamed('/terms');
+          return;
+        }
+      }
+      
+      // For the initial flow, always force users to login after splash screen
+      // to ensure the correct authentication
+      authCheckComplete = true;
+      print("Routing to login screen from splash");
+      Navigator.of(context).pushReplacementNamed('/login');
+    } catch (e) {
+      print('Error in splash screen: $e');
+      // If there's an error, default to login page
+      if (mounted && !authCheckComplete) {
+        authCheckComplete = true;
         Navigator.of(context).pushReplacementNamed('/login');
       }
     }
@@ -57,29 +98,15 @@ class _SplashScreenState extends State<SplashScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF8B5CF6), // purple-600
+      backgroundColor: Theme.of(context).primaryColor,
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // Logo or app icon
-            Container(
-              width: 120,
-              height: 120,
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: const Center(
-                child: Text(
-                  'IA',
-                  style: TextStyle(
-                    color: Color(0xFF8B5CF6), // purple-600
-                    fontSize: 48,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
+            Image.asset(
+              'assets/immy_BrainyBear.png',
+              width: 150,
+              height: 150,
             ),
             const SizedBox(height: 24),
             const Text(
@@ -90,7 +117,7 @@ class _SplashScreenState extends State<SplashScreen> {
                 fontWeight: FontWeight.bold,
               ),
             ),
-            const SizedBox(height: 48),
+            const SizedBox(height: 24),
             const CircularProgressIndicator(
               valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
             ),

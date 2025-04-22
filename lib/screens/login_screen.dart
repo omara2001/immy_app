@@ -10,8 +10,8 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _emailController = TextEditingController();
-  final _passwordController = TextEditingController();
+  final _emailController = TextEditingController(text: 'test@example.com');
+  final _passwordController = TextEditingController(text: 'password123');
   final _authService = AuthService();
   
   bool _isLoading = false;
@@ -39,27 +39,27 @@ class _LoginScreenState extends State<LoginScreen> {
       final email = _emailController.text.trim();
       final password = _passwordController.text;
       
-      print("Login attempt: $email / $password");
+      print("Login attempt with: $email / $password");
       
       final user = await _authService.login(email, password);
       
-      print("Logged in user: ${user.name}, isAdmin: ${user.isAdmin}");
+      print("Login successful. User: ${user.name}, isAdmin: ${user.isAdmin}");
       
       if (mounted) {
         // If admin, navigate to admin dashboard
         if (user.isAdmin) {
-          print("Navigating to admin dashboard");
-          Navigator.of(context).pushReplacementNamed('/admin/dashboard');
+          print("Admin login confirmed - navigating to home page");
+          Navigator.of(context).pushReplacementNamed('/home');
         } else {
           // Otherwise, navigate to home page
-          print("Navigating to home page");
+          print("User login confirmed - navigating to home page");
           Navigator.of(context).pushReplacementNamed('/home');
         }
       }
     } catch (e) {
       print("Login error: $e");
       setState(() {
-        _errorMessage = e.toString();
+        _errorMessage = e.toString().replaceAll('Exception: ', '');
       });
     } finally {
       if (mounted) {

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'terms_and_conditions_page.dart';
+import '../services/users_auth_service.dart' as user_auth;
 
 class TermsOfServicePage extends StatefulWidget {
   const TermsOfServicePage({super.key});
@@ -11,6 +12,8 @@ class TermsOfServicePage extends StatefulWidget {
 
 class _TermsOfServicePageState extends State<TermsOfServicePage> {
   bool _termsAccepted = false;
+  final _authService = user_auth.AuthService();
+  bool _isLoading = false;
 
   @override
   Widget build(BuildContext context) {
@@ -100,9 +103,9 @@ class _TermsOfServicePageState extends State<TermsOfServicePage> {
                 width: double.infinity,
                 height: 50,
                 child: ElevatedButton(
-                  onPressed: _termsAccepted
+                  onPressed: _termsAccepted && !_isLoading
                       ? () {
-                          _showTermsAcceptedDialog();
+                          _handleTermsAccepted();
                         }
                       : null,
                   style: ElevatedButton.styleFrom(
@@ -113,10 +116,19 @@ class _TermsOfServicePageState extends State<TermsOfServicePage> {
                     ),
                     disabledBackgroundColor: const Color(0xFFD1D5DB), // gray-300
                   ),
-                  child: const Text(
-                    'Agree & Continue',
-                    style: TextStyle(fontSize: 18),
-                  ),
+                  child: _isLoading
+                      ? const SizedBox(
+                          height: 24,
+                          width: 24,
+                          child: CircularProgressIndicator(
+                            color: Colors.white,
+                            strokeWidth: 2,
+                          ),
+                        )
+                      : const Text(
+                          'Agree & Continue',
+                          style: TextStyle(fontSize: 18),
+                        ),
                 ),
               ),
               const SizedBox(height: 20),
@@ -135,28 +147,33 @@ class _TermsOfServicePageState extends State<TermsOfServicePage> {
     );
   }
 
-  void _showTermsAcceptedDialog() async {
-    // Save that user has accepted terms
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('terms_accepted', true);
-    
-    if (!mounted) return;
-    
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Terms accepted!'),
-        content: const Text('Proceeding to Immy app.'),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.of(context).pop();
-              Navigator.of(context).pushReplacementNamed('/home');
-            },
-            child: const Text('OK'),
-          ),
-        ],
-      ),
-    );
+  Future<void> _handleTermsAccepted() async {
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      // Save that user has accepted terms
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('terms_accepted', true);
+      
+      if (!mounted) return;
+      
+      // Force users to login after accepting terms
+      print("Terms accepted, going to login screen");
+      Navigator.of(context).pushReplacementNamed('/login');
+    } catch (e) {
+      print("Error handling terms acceptance: $e");
+      // If there's any error, just go to the login screen
+      if (mounted) {
+        Navigator.of(context).pushReplacementNamed('/login');
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
   }
 }

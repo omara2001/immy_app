@@ -2,10 +2,14 @@ import 'package:flutter/material.dart';
 
 class SubscriptionBanner extends StatelessWidget {
   final bool isActive;
+  final String? nextPaymentDate;
+  final VoidCallback? onActivateTap;
 
   const SubscriptionBanner({
     super.key,
     this.isActive = true,
+    this.nextPaymentDate,
+    this.onActivateTap,
   });
 
   @override
@@ -46,7 +50,7 @@ class SubscriptionBanner extends StatelessWidget {
                 ),
                 Text(
                   isActive
-                      ? 'Your Immy is fully activated! Next payment: June 15, 2023'
+                      ? 'Your Immy is fully activated! ${nextPaymentDate != null ? 'Next payment: $nextPaymentDate' : ''}'
                       : "Reactivate your subscription to unlock Immy's full potential.",
                   style: const TextStyle(
                     fontSize: 12,
@@ -58,7 +62,7 @@ class SubscriptionBanner extends StatelessWidget {
           ),
           if (!isActive)
             ElevatedButton(
-              onPressed: () {},
+              onPressed: onActivateTap,
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF8B5CF6), // purple-600
                 foregroundColor: Colors.white,

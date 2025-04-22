@@ -48,6 +48,19 @@ class _HomePageState extends State<HomePage> {
     
     _checkAdminStatus();
     _loadUserData();
+    
+    // Handle initial tab if provided
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final args = ModalRoute.of(context)?.settings.arguments;
+      if (args is Map<String, dynamic> && args.containsKey('initialTab')) {
+        final initialTab = args['initialTab'] as int;
+        if (initialTab >= 0 && initialTab < _pages.length) {
+          setState(() {
+            _selectedIndex = initialTab;
+          });
+        }
+      }
+    });
   }
 
   Future<void> _loadUserData() async {
@@ -436,6 +449,7 @@ class HomeContent extends StatelessWidget {
                   'View what Emma has been learning',
                   const Color(0xFFE0E7FF),
                   const Color(0xFF4F46E5),
+                  onTap: () => Navigator.pushNamed(context, '/recent-conversations'),
                 ),
                 _buildQuickActionCard(
                   context,

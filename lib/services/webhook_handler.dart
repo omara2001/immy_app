@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:io';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -7,8 +6,7 @@ import '../services/backend_api_service.dart';
 import '../services/stripe_service.dart';
 
 class WebhookHandler {
-  static const String _endpointSecret = ''; // Add your webhook secret here
-  
+  static const String _endpointSecret = 'whsec_1d3bcb16bbc5da4b89b7d6f31da988f14c5c0d7b2f3cb4586d5f31c2c13f41b6'; // Webhook signing secret
   // Handle Stripe webhook events
   static Future<Map<String, dynamic>> handleWebhook(
     String payload,
@@ -118,10 +116,20 @@ class WebhookHandler {
         // Create payment record if it doesn't exist
         final amount = paymentIntent['amount'] / 100.0;
         final currency = paymentIntent['currency'];
+        String? paymentMethodId;
         
-        await BackendApiService.executeInsert(
-          'INSERT INTO Payments (user_id, serial_id, amount, currency, payment_status, stripe_payment_id) VALUES (?, ?, ?, ?, ?, ?)',
-          [userId, serialId, amount, currency, 'completed', paymentIntent['id']]
+        // Safely extract payment method ID
+        if (paymentIntent.containsKey('payment_method')) {
+          paymentMethodId = paymentIntent['payment_method']?.toString();
+        }
+        
+        await BackendApiService.createPayment(
+          userId, 
+          serialId, 
+          amount, 
+          currency, 
+          stripePaymentId: paymentIntent['id'],
+          stripePaymentMethodId: paymentMethodId
         );
       }
       
@@ -133,7 +141,13 @@ class WebhookHandler {
       
       if (subscriptions.isEmpty) {
         final endDate = DateTime.now().add(const Duration(days: 30));
-        await BackendApiService.createSubscription(userId, serialId, endDate);
+        await BackendApiService.createSubscription(
+          userId, 
+          serialId, 
+          endDate,
+          stripeSubscriptionId: paymentIntent['id'],
+          stripePriceId: ''
+        );
       }
     } catch (e) {
       print('Error handling payment_intent.succeeded: $e');
@@ -187,10 +201,31 @@ class WebhookHandler {
         subscription['current_period_end'] * 1000
       );
       
+      // Extract price ID safely
+      String? priceId;
+      try {
+        final items = subscription['items'] as Map<String, dynamic>?;
+        if (items != null && items.containsKey('data')) {
+          final dataList = items['data'] as List?;
+          if (dataList != null && dataList.isNotEmpty) {
+            final firstItem = dataList[0] as Map<String, dynamic>?;
+            if (firstItem != null && firstItem.containsKey('price')) {
+              final price = firstItem['price'] as Map<String, dynamic>?;
+              priceId = price?['id'] as String?;
+            }
+          }
+        }
+      } catch (e) {
+        print('Error extracting price ID: $e');
+      }
+      
       for (final serial in serials) {
-        await BackendApiService.executeQuery(
-          'INSERT INTO Subscriptions (user_id, serial_id, end_date, status, stripe_subscription_id) VALUES (?, ?, ?, ?, ?)',
-          [userId, serial['id'], endDate.toIso8601String(), 'active', subscription['id']]
+        await BackendApiService.createSubscription(
+          userId, 
+          serial['id'], 
+          endDate,
+          stripeSubscriptionId: subscription['id'],
+          stripePriceId: priceId
         );
       }
     } catch (e) {
@@ -246,7 +281,7 @@ class WebhookHandler {
       if (subscriptionId == null) return;
       
       // Get subscription details from Stripe
-      final subscription = await StripeService.handleResponse(
+      final subscription = StripeService.handleResponse(
         await http.get(
           Uri.parse('${StripeService.baseUrl}/subscriptions/$subscriptionId'),
           headers: StripeService.headers,

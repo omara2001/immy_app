@@ -24,10 +24,13 @@ android {
         applicationId = "com.example.immy_app"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
+        minSdk = 21 // Ensure minSdk is at least 21 for Stripe
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        
+        // Required for Stripe
+        multiDexEnabled = true
     }
 
     buildTypes {
@@ -37,6 +40,12 @@ android {
             signingConfig = signingConfigs.debug
         }
     }
+}
+
+dependencies {
+    // Add support for Stripe
+    implementation "androidx.appcompat:appcompat:1.4.1"
+    implementation "com.google.android.material:material:1.4.0"
 }
 
 flutter {

@@ -303,7 +303,14 @@ class AuthService {
       print("Verified saved user: ${savedUser.name}, isAdmin: ${savedUser.isAdmin}");
     }
   }
-  
+  Future<bool> isUserSubscribed(int userId) async {
+  final subs = await BackendApiService.getUserSubscriptions(userId);
+  final now = DateTime.now();
+  return subs.any((s) =>
+    s['status'] == 'active' &&
+    DateTime.tryParse(s['end_date'] ?? '')?.isAfter(now) == true
+  );
+}
   // Initialize admin user if it doesn't exist
   Future<void> initializeAdminUser() async {
     try {

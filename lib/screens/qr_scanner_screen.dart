@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:immy_app/models/user_profile.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import '../services/serial_service.dart';
 import '../services/qr_scanner_service.dart';
 import '../models/serial_number.dart';
+import '../services/backend_api_service.dart';
+
+import '../services/users_auth_service.dart' as user_auth;
 
 class QrScannerScreen extends StatefulWidget {
   final SerialService serialService;
@@ -35,53 +39,94 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
   }
 
   Future<void> _processScannedCode(String code) async {
-    if (_isProcessing || code == _lastScanned) return;
+  if (_isProcessing || code == _lastScanned) return;
 
-    setState(() {
-      _isProcessing = true;
-      _lastScanned = code;
-    });
+  setState(() {
+    _isProcessing = true;
+    _lastScanned = code;
+  });
 
-    try {
-      // Process the scanned code
-      final result = await _qrScannerService.processScannedCode(code);
-      
-      // Save to recent scans
-      await _qrScannerService.saveRecentScan(code);
-      
+  try {
+    // ✅ 1. Get current user
+    final user = await user_auth.AuthService().getCurrentUser();
+
+    if (user == null) {
       if (mounted) {
-        if (result['success']) {
-          // Show success dialog
-          await _showResultDialog(
-            title: 'Valid Immy Bear',
-            message: result['message'],
-            isSuccess: true,
-            serial: result['serial'],
-            isAssigned: result['isAssigned'],
-          );
-        } else {
-          // Show error dialog
-          await _showResultDialog(
-            title: 'Invalid QR Code',
-            message: result['message'],
-            isSuccess: false,
-          );
-        }
+        Navigator.pushNamed(context, '/login');
       }
-    } catch (e) {
+      return;
+    }
+
+    // ✅ 2. Check subscription
+    final isSubscribed = await user_auth.AuthService().isUserSubscribed(user.id);
+
+    if (!isSubscribed) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error processing QR code: $e')),
+        Navigator.pushNamed(
+          context,
+          '/subscription',
+          arguments: {'userId': user.id},
         );
       }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isProcessing = false;
-        });
+      return;
+    }
+
+    // ✅ 3. Process scanned code
+    final result = await _qrScannerService.processScannedCode(code);
+
+    // ✅ 4. Save recent scan
+    await _qrScannerService.saveRecentScan(code);
+
+    if (mounted) {
+      if (result['success']) {
+        final SerialNumber serial = result['serial'];
+
+        // ✅ 5. Get full user data from backend
+        final userMap = await BackendApiService.getUserByEmail(user.email);
+        if (userMap == null) {
+          throw Exception('User not found in database');
+        }
+
+        final userProfile = UserProfile(
+          id: userMap['id'].toString(),
+          email: userMap['email'],
+          name: userMap['name'],
+        );
+
+        // ✅ 6. Assign serial
+        await widget.serialService.assignSerialToUser(userProfile, serial);
+
+        // ✅ 7. Show success dialog
+        await _showResultDialog(
+          title: 'Valid Immy Bear',
+          message: result['message'],
+          isSuccess: true,
+          serial: serial,
+          isAssigned: result['isAssigned'],
+        );
+      } else {
+        // ❌ Invalid QR
+        await _showResultDialog(
+          title: 'Invalid QR Code',
+          message: result['message'],
+          isSuccess: false,
+        );
       }
     }
+  } catch (e) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error processing QR code: $e')),
+      );
+    }
+  } finally {
+    if (mounted) {
+      setState(() {
+        _isProcessing = false;
+      });
+    }
   }
+}
 
   Future<void> _showResultDialog({
     required String title,

@@ -3,14 +3,15 @@ class ConversationMessage {
   final String sender;
   final String content;
   final DateTime timestamp;
-  
+
   ConversationMessage({
     required this.id,
     required this.sender,
     required this.content,
     required this.timestamp,
   });
-  
+
+  // Factory to create ConversationMessage from JSON
   factory ConversationMessage.fromJson(Map<String, dynamic> json) {
     return ConversationMessage(
       id: json['id'],
@@ -19,7 +20,8 @@ class ConversationMessage {
       timestamp: DateTime.parse(json['timestamp']),
     );
   }
-  
+
+  // Helper to format timestamp nicely
   String get formattedTime {
     return '${timestamp.hour.toString().padLeft(2, '0')}:${timestamp.minute.toString().padLeft(2, '0')}';
   }
@@ -31,8 +33,8 @@ class ConversationDetail {
   final DateTime startTime;
   final DateTime endTime;
   final List<ConversationMessage> messages;
-  final Map<String, dynamic>? insights;
-  
+  Map<String, dynamic>? insights; // NOT final anymore, so it can be updated
+
   ConversationDetail({
     required this.id,
     required this.title,
@@ -41,7 +43,8 @@ class ConversationDetail {
     required this.messages,
     this.insights,
   });
-  
+
+  // Factory to create ConversationDetail from JSON
   factory ConversationDetail.fromJson(Map<String, dynamic> json) {
     return ConversationDetail(
       id: json['id'],
@@ -54,15 +57,16 @@ class ConversationDetail {
       insights: json['insights'],
     );
   }
-  
+
+  // Calculate conversation duration
   String get duration {
     final difference = endTime.difference(startTime);
     final minutes = difference.inMinutes;
     final seconds = difference.inSeconds % 60;
-    
     return '$minutes min ${seconds}s';
   }
-  
+
+  // Format date nicely
   String get formattedDate {
     return '${startTime.day}/${startTime.month}/${startTime.year}';
   }

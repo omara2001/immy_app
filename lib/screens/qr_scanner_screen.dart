@@ -266,8 +266,3 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
   }
 }
 
-extension on MobileScannerController {
-  get cameraFacingState => null;
-  
-  get torchState => null;
-}

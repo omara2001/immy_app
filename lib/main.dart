@@ -43,10 +43,10 @@ void main() async {
     StripeService.initialize(
       secretKey: 'sk_test_51R00wJP1l4vbhTn5Xfe5zWNZrVtHyA7EeP1REpL92RXarOtVRelDEPPHBNdvEdhWRFMd66CWmOLd2cCI2ZF6aAls00jM6x0sdT',
       publishableKey: Stripe.publishableKey,
-      testMode: true,
+      testMode: false, // Change this to false to use real API calls with test keys
     );
     
-    print('Stripe initialized successfully in test mode');
+    print('Stripe initialized successfully with test keys in live mode');
   } catch (e) {
     print('Error initializing Stripe (will use mock data): $e');
     // Initialize Stripe service in test mode anyway to ensure mocks work
@@ -186,7 +186,6 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
             ),
         '/recent-conversations': (context) => RecentConversationsScreen(
               apiService: widget.apiService,
-              authService: widget.authService,
             ),
         '/scan-qr-code': (context) => QrScannerScreen(
               serialService: widget.serialService,

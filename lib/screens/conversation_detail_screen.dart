@@ -17,7 +17,7 @@ class ConversationDetailScreen extends StatefulWidget {
     this.authService,
     this.usersAuthService,
   });
-  
+
   @override
   State<ConversationDetailScreen> createState() => _ConversationDetailScreenState();
 }
@@ -27,14 +27,14 @@ class _ConversationDetailScreenState extends State<ConversationDetailScreen> {
   String? _errorMessage;
   ConversationDetail? _conversation;
   bool _isAdmin = false;
-  
+
   @override
   void initState() {
     super.initState();
     _checkAdminStatus();
     _loadConversationDetails();
   }
-  
+
   Future<void> _checkAdminStatus() async {
     if (widget.authService != null) {
       final isAdmin = await widget.authService!.isCurrentUserAdmin();
@@ -43,31 +43,25 @@ class _ConversationDetailScreenState extends State<ConversationDetailScreen> {
       }
     }
   }
-  
+
   Future<void> _loadConversationDetails() async {
     setState(() {
       _isLoading = true;
       _errorMessage = null;
     });
-    
+
     try {
-      // Get auth token if available
       String? token;
-      if (widget.usersAuthService!= null) {
+      if (widget.usersAuthService != null) {
         token = await widget.usersAuthService!.getToken();
       }
-      
-      // Use mock data for testing
-      final data = await widget.apiService.getMockConversationDetails(
+
+      // ✅ نستخدم الداتا الحقيقية من API
+      final data = await widget.apiService.getConversationDetails(
         widget.conversationId,
+        token: token,
       );
-      
-      // In production, use this:
-      // final data = await widget.apiService.getConversationDetails(
-      //   widget.conversationId,
-      //   token: token,
-      // );
-      
+
       if (mounted) {
         setState(() {
           _conversation = ConversationDetail.fromJson(data);
@@ -77,13 +71,13 @@ class _ConversationDetailScreenState extends State<ConversationDetailScreen> {
     } catch (e) {
       if (mounted) {
         setState(() {
-          _errorMessage = e.toString();
+          _errorMessage = 'Failed to load conversation details. Please try again.';
           _isLoading = false;
         });
       }
     }
   }
-  
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -93,52 +87,7 @@ class _ConversationDetailScreenState extends State<ConversationDetailScreen> {
         foregroundColor: Colors.white,
         actions: [
           if (_isAdmin)
-            PopupMenuButton<String>(
-              icon: const Icon(Icons.more_vert),
-              onSelected: (value) {
-                if (value == 'export') {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Exporting conversation...')),
-                  );
-                } else if (value == 'delete') {
-                  _showDeleteDialog();
-                } else if (value == 'flag') {
-                  _showFlagDialog();
-                }
-              },
-              itemBuilder: (context) => [
-                const PopupMenuItem(
-                  value: 'export',
-                  child: Row(
-                    children: [
-                      Icon(Icons.download_outlined, size: 18),
-                      SizedBox(width: 8),
-                      Text('Export'),
-                    ],
-                  ),
-                ),
-                const PopupMenuItem(
-                  value: 'flag',
-                  child: Row(
-                    children: [
-                      Icon(Icons.flag_outlined, size: 18),
-                      SizedBox(width: 8),
-                      Text('Flag'),
-                    ],
-                  ),
-                ),
-                const PopupMenuItem(
-                  value: 'delete',
-                  child: Row(
-                    children: [
-                      Icon(Icons.delete_outline, size: 18, color: Color(0xFFDC2626)),
-                      SizedBox(width: 8),
-                      Text('Delete', style: TextStyle(color: Color(0xFFDC2626))),
-                    ],
-                  ),
-                ),
-              ],
-            ),
+            _buildAdminMenu(),
         ],
       ),
       body: _isLoading
@@ -148,7 +97,49 @@ class _ConversationDetailScreenState extends State<ConversationDetailScreen> {
               : _buildConversationDetail(),
     );
   }
-  
+
+  PopupMenuButton<String> _buildAdminMenu() {
+    return PopupMenuButton<String>(
+      icon: const Icon(Icons.more_vert),
+      onSelected: (value) {
+        if (value == 'export') {
+          _showSnackbar('Exporting conversation...');
+        } else if (value == 'delete') {
+          _showDeleteDialog();
+        } else if (value == 'flag') {
+          _showFlagDialog();
+        }
+      },
+      itemBuilder: (context) => [
+        _buildPopupMenuItem('Export', Icons.download_outlined, 'export'),
+        _buildPopupMenuItem('Flag', Icons.flag_outlined, 'flag'),
+        _buildPopupMenuItem('Delete', Icons.delete_outline, 'delete', isDanger: true),
+      ],
+    );
+  }
+
+  PopupMenuItem<String> _buildPopupMenuItem(String text, IconData icon, String value, {bool isDanger = false}) {
+    return PopupMenuItem(
+      value: value,
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: isDanger ? const Color(0xFFDC2626) : null),
+          const SizedBox(width: 8),
+          Text(
+            text,
+            style: TextStyle(color: isDanger ? const Color(0xFFDC2626) : null),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showSnackbar(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
   void _showDeleteDialog() {
     showDialog(
       context: context,
@@ -161,16 +152,11 @@ class _ConversationDetailScreenState extends State<ConversationDetailScreen> {
             child: const Text('Cancel'),
           ),
           TextButton(
-            style: TextButton.styleFrom(
-              foregroundColor: const Color(0xFFDC2626),
-            ),
+            style: TextButton.styleFrom(foregroundColor: const Color(0xFFDC2626)),
             onPressed: () {
               Navigator.pop(context);
-              // Delete conversation logic would go here
-              Navigator.pop(context); // Return to previous screen
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Conversation deleted')),
-              );
+              Navigator.pop(context); // Close the screen
+              _showSnackbar('Conversation deleted');
             },
             child: const Text('Delete'),
           ),
@@ -178,7 +164,7 @@ class _ConversationDetailScreenState extends State<ConversationDetailScreen> {
       ),
     );
   }
-  
+
   void _showFlagDialog() {
     showDialog(
       context: context,
@@ -193,9 +179,7 @@ class _ConversationDetailScreenState extends State<ConversationDetailScreen> {
           TextButton(
             onPressed: () {
               Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Conversation flagged for review')),
-              );
+              _showSnackbar('Conversation flagged for review');
             },
             child: const Text('Flag'),
           ),
@@ -203,7 +187,7 @@ class _ConversationDetailScreenState extends State<ConversationDetailScreen> {
       ),
     );
   }
-  
+
   Widget _buildErrorView() {
     return Center(
       child: Padding(
@@ -211,11 +195,7 @@ class _ConversationDetailScreenState extends State<ConversationDetailScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(
-              Icons.error_outline,
-              color: Color(0xFFEF4444),
-              size: 64,
-            ),
+            const Icon(Icons.error_outline, color: Color(0xFFEF4444), size: 64),
             const SizedBox(height: 16),
             Text(
               'Error loading conversation',
@@ -238,26 +218,21 @@ class _ConversationDetailScreenState extends State<ConversationDetailScreen> {
       ),
     );
   }
-  
+
   Widget _buildConversationDetail() {
     if (_conversation == null) {
-      return const Center(
-        child: Text('No conversation data available'),
-      );
+      return const Center(child: Text('No conversation data available'));
     }
-    
+
     return Column(
       children: [
         _buildConversationHeader(),
-        Expanded(
-          child: _buildMessageList(),
-        ),
-        if (_conversation!.insights != null)
-          _buildInsightsSection(),
+        Expanded(child: _buildMessageList()),
+        if (_conversation!.insights != null) _buildInsightsSection(),
       ],
     );
   }
-  
+
   Widget _buildConversationHeader() {
     return Container(
       padding: const EdgeInsets.all(16),
@@ -269,10 +244,7 @@ class _ConversationDetailScreenState extends State<ConversationDetailScreen> {
             children: [
               const CircleAvatar(
                 backgroundColor: Color(0xFFE0E7FF),
-                child: Icon(
-                  Icons.chat_bubble_outline,
-                  color: Color(0xFF4F46E5),
-                ),
+                child: Icon(Icons.chat_bubble_outline, color: Color(0xFF4F46E5)),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -281,17 +253,11 @@ class _ConversationDetailScreenState extends State<ConversationDetailScreen> {
                   children: [
                     Text(
                       _conversation!.title,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 18,
-                      ),
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
                     ),
                     Text(
                       _conversation!.formattedDate,
-                      style: const TextStyle(
-                        color: Color(0xFF6B7280),
-                        fontSize: 14,
-                      ),
+                      style: const TextStyle(color: Color(0xFF6B7280), fontSize: 14),
                     ),
                   ],
                 ),
@@ -301,63 +267,31 @@ class _ConversationDetailScreenState extends State<ConversationDetailScreen> {
           const SizedBox(height: 12),
           Row(
             children: [
-              _buildInfoChip(
-                Icons.access_time,
-                _conversation!.duration,
-                const Color(0xFFDCFCE7),
-                const Color(0xFF16A34A),
-              ),
+              _buildInfoChip(Icons.access_time, _conversation!.duration, const Color(0xFFDCFCE7), const Color(0xFF16A34A)),
               const SizedBox(width: 8),
-              _buildInfoChip(
-                Icons.chat,
-                '${_conversation!.messages.length} messages',
-                const Color(0xFFEDE9FE),
-                const Color(0xFF8B5CF6),
-              ),
+              _buildInfoChip(Icons.chat, '${_conversation!.messages.length} messages', const Color(0xFFEDE9FE), const Color(0xFF8B5CF6)),
             ],
           ),
         ],
       ),
     );
   }
-  
-  Widget _buildInfoChip(
-    IconData icon,
-    String label,
-    Color bgColor,
-    Color iconColor,
-  ) {
+
+  Widget _buildInfoChip(IconData icon, String label, Color bgColor, Color iconColor) {
     return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: 12,
-        vertical: 6,
-      ),
-      decoration: BoxDecoration(
-        color: bgColor,
-        borderRadius: BorderRadius.circular(16),
-      ),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(color: bgColor, borderRadius: BorderRadius.circular(16)),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(
-            icon,
-            size: 16,
-            color: iconColor,
-          ),
+          Icon(icon, size: 16, color: iconColor),
           const SizedBox(width: 4),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w500,
-              color: iconColor,
-            ),
-          ),
+          Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: iconColor)),
         ],
       ),
     );
   }
-  
+
   Widget _buildMessageList() {
     return ListView.builder(
       padding: const EdgeInsets.all(16),
@@ -365,32 +299,19 @@ class _ConversationDetailScreenState extends State<ConversationDetailScreen> {
       itemBuilder: (context, index) {
         final message = _conversation!.messages[index];
         final isImmy = message.sender.toLowerCase() == 'immy';
-        
         return _buildMessageBubble(message, isImmy);
       },
     );
   }
-  
+
   Widget _buildMessageBubble(ConversationMessage message, bool isImmy) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
       child: Row(
         mainAxisAlignment: isImmy ? MainAxisAlignment.start : MainAxisAlignment.end,
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           if (isImmy) ...[
-            const CircleAvatar(
-              backgroundColor: Color(0xFFDDEEFD),
-              radius: 16,
-              child: Text(
-                'IB',
-                style: TextStyle(
-                  color: Color(0xFF1E40AF),
-                  fontWeight: FontWeight.bold,
-                  fontSize: 12,
-                ),
-              ),
-            ),
+            const CircleAvatar(backgroundColor: Color(0xFFDDEEFD), radius: 16, child: Text('IB', style: TextStyle(color: Color(0xFF1E40AF), fontWeight: FontWeight.bold, fontSize: 12))),
             const SizedBox(width: 8),
           ],
           Flexible(
@@ -408,150 +329,69 @@ class _ConversationDetailScreenState extends State<ConversationDetailScreen> {
                   ),
                   child: Text(
                     message.content,
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: isImmy ? const Color(0xFF1E40AF) : const Color(0xFF5B21B6),
-                    ),
+                    style: TextStyle(fontSize: 14, color: isImmy ? const Color(0xFF1E40AF) : const Color(0xFF5B21B6)),
                   ),
                 ),
                 const SizedBox(height: 4),
                 Text(
                   message.formattedTime,
-                  style: const TextStyle(
-                    fontSize: 10,
-                    color: Color(0xFF6B7280),
-                  ),
+                  style: const TextStyle(fontSize: 10, color: Color(0xFF6B7280)),
                 ),
               ],
             ),
           ),
           if (!isImmy) ...[
             const SizedBox(width: 8),
-            const CircleAvatar(
-              backgroundColor: Color(0xFFF3E8FF),
-              radius: 16,
-              child: Text(
-                'E',
-                style: TextStyle(
-                  color: Color(0xFF7E22CE),
-                  fontWeight: FontWeight.bold,
-                  fontSize: 12,
-                ),
-              ),
-            ),
+            const CircleAvatar(backgroundColor: Color(0xFFF3E8FF), radius: 16, child: Text('E', style: TextStyle(color: Color(0xFF7E22CE), fontWeight: FontWeight.bold, fontSize: 12))),
           ],
         ],
       ),
     );
   }
-  
+
   Widget _buildInsightsSection() {
     final insights = _conversation!.insights!;
-    
+
     return Container(
       padding: const EdgeInsets.all(16),
       color: const Color(0xFFF9FAFB),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Conversation Insights',
-            style: TextStyle(
-              fontWeight: FontWeight.bold,
-              fontSize: 16,
-            ),
-          ),
+          const Text('Conversation Insights', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
           const SizedBox(height: 12),
-          if (insights.containsKey('topics')) ...[
-            const Text(
-              'Topics Discussed',
-              style: TextStyle(
-                fontWeight: FontWeight.w500,
-                fontSize: 14,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: (insights['topics'] as List).map((topic) {
-                return Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF3F4F6),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Text(
-                    topic,
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: Color(0xFF4B5563),
-                    ),
-                  ),
-                );
-              }).toList(),
-            ),
-          ],
-          if (insights.containsKey('sentiment')) ...[
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                const Text(
-                  'Overall Sentiment:',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w500,
-                    fontSize: 14,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                _buildSentimentIndicator(insights['sentiment']),
-              ],
-            ),
-          ],
-          if (insights.containsKey('learning_points')) ...[
-            const SizedBox(height: 12),
-            const Text(
-              'Learning Points',
-              style: TextStyle(
-                fontWeight: FontWeight.w500,
-                fontSize: 14,
-              ),
-            ),
-            const SizedBox(height: 8),
-            ...List.generate(
-              (insights['learning_points'] as List).length,
-              (index) => Padding(
-                padding: const EdgeInsets.only(bottom: 4),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('• '),
-                    Expanded(
-                      child: Text(
-                        insights['learning_points'][index],
-                        style: const TextStyle(
-                          fontSize: 14,
-                          color: Color(0xFF4B5563),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
+          if (insights.containsKey('topics')) _buildTopics(insights['topics']),
+          if (insights.containsKey('sentiment')) _buildSentiment(insights['sentiment']),
+          if (insights.containsKey('learning_points')) _buildLearningPoints(insights['learning_points']),
         ],
       ),
     );
   }
-  
-  Widget _buildSentimentIndicator(String sentiment) {
+
+  Widget _buildTopics(List topics) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('Topics Discussed', style: TextStyle(fontWeight: FontWeight.w500, fontSize: 14)),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: topics.map<Widget>((topic) {
+            return Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(color: const Color(0xFFF3F4F6), borderRadius: BorderRadius.circular(12)),
+              child: Text(topic, style: const TextStyle(fontSize: 12, color: Color(0xFF4B5563))),
+            );
+          }).toList(),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSentiment(String sentiment) {
     Color color;
     IconData icon;
-    
     switch (sentiment.toLowerCase()) {
       case 'positive':
         color = const Color(0xFF16A34A);
@@ -569,35 +409,44 @@ class _ConversationDetailScreenState extends State<ConversationDetailScreen> {
         color = const Color(0xFF4B5563);
         icon = Icons.sentiment_neutral;
     }
-    
-    return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: 8,
-        vertical: 4,
-      ),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            icon,
-            size: 16,
-            color: color,
+
+    return Row(
+      children: [
+        const Text('Overall Sentiment:', style: TextStyle(fontWeight: FontWeight.w500, fontSize: 14)),
+        const SizedBox(width: 8),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(12)),
+          child: Row(
+            children: [
+              Icon(icon, size: 16, color: color),
+              const SizedBox(width: 4),
+              Text(sentiment, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: color)),
+            ],
           ),
-          const SizedBox(width: 4),
-          Text(
-            sentiment,
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w500,
-              color: color,
-            ),
-          ),
-        ],
-      ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildLearningPoints(List points) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 12),
+        const Text('Learning Points', style: TextStyle(fontWeight: FontWeight.w500, fontSize: 14)),
+        const SizedBox(height: 8),
+        ...points.map((point) => Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('• '),
+                  Expanded(child: Text(point, style: const TextStyle(fontSize: 14, color: Color(0xFF4B5563)))),
+                ],
+              ),
+            )),
+      ],
     );
   }
 }

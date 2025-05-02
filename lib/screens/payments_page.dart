@@ -247,8 +247,8 @@ class _PaymentsPageState extends State<PaymentsPage> {
   Future<String> _getCustomerId() async {
     try {
       if (_userId == 0 || _userId == 999) {
-        // For demo mode, always return a consistent mock customer ID
-        return 'cus_demo_${_userId}';
+        // For test users, use StripeService to get or create a real customer
+        return await StripeService.getOrCreateCustomerId(_userId);
       }
       
       final users = await BackendApiService.executeQuery(
@@ -288,6 +288,67 @@ class _PaymentsPageState extends State<PaymentsPage> {
     ).then((_) => _loadData());
   }
   
+  Future<bool> _checkExistingPayment() async {
+    try {
+      // Check if there's already a completed payment for this user
+      final payments = await BackendApiService.executeQuery(
+        'SELECT * FROM Payments WHERE user_id = ? AND payment_status = ?',
+        [_userId, 'completed']
+      );
+      
+      if (payments.isNotEmpty) {
+        // Check if there's an active subscription
+        final subscriptions = await BackendApiService.executeQuery(
+          'SELECT * FROM Subscriptions WHERE user_id = ? AND status = ? AND end_date > ?',
+          [_userId, 'active', DateTime.now().toIso8601String()]
+        );
+        
+        if (subscriptions.isEmpty) {
+          // Payment exists but no active subscription, create one
+          // Get the serial ID from the payment record or fetch from database
+          int? serialId;
+          
+          if (payments.first.containsKey('serial_id') && payments.first['serial_id'] != null) {
+            serialId = payments.first['serial_id'];
+          } else {
+            // Try to get a serial number for this user
+            final serials = await BackendApiService.executeQuery(
+              'SELECT id FROM SerialNumbers WHERE user_id = ? LIMIT 1',
+              [_userId]
+            );
+            
+            if (serials.isNotEmpty) {
+              serialId = serials.first['id'];
+            }
+          }
+          
+          if (serialId != null) {
+            final endDate = DateTime.now().add(const Duration(days: 30));
+            await BackendApiService.createSubscription(
+              _userId, 
+              serialId, 
+              endDate,
+              stripeSubscriptionId: payments.first['stripe_payment_id'],
+              stripePriceId: 'price_standard'
+            );
+            
+            // Refresh data
+            await _loadData();
+            return true;
+          }
+        } else {
+          // Already has active subscription
+          return true;
+        }
+      }
+      
+      return false;
+    } catch (e) {
+      print('Error checking existing payment: $e');
+      return false;
+    }
+  }
+  
   Future<void> _subscribeNow() async {
     try {
       // Get the current user
@@ -304,6 +365,14 @@ class _PaymentsPageState extends State<PaymentsPage> {
       
       // Set user ID from the current user
       _userId = user.id;
+      
+      // Check if user already has a payment
+      final hasExistingPayment = await _checkExistingPayment();
+      if (hasExistingPayment) {
+        // User already has a payment, show success dialog
+        await _showPaymentSuccessDialog();
+        return;
+      }
       
       setState(() {
         _isLoading = true;

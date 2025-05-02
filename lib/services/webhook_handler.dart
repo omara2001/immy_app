@@ -97,60 +97,108 @@ class WebhookHandler {
       final serialId = int.tryParse(metadata['serial_id']?.toString() ?? '');
       
       if (userId == null || serialId == null) {
-        print('Missing user_id or serial_id in payment intent metadata');
+        print('Missing user_id or serial_id in payment intent metadata, trying to find user from payment method');
+        
+        // Try to find the user from the payment method's customer
+        String? customerId;
+        if (paymentIntent.containsKey('customer')) {
+          customerId = paymentIntent['customer']?.toString();
+        }
+        
+        if (customerId != null) {
+          final users = await BackendApiService.executeQuery(
+            'SELECT id FROM Users WHERE stripe_customer_id = ?',
+            [customerId]
+          );
+          
+          if (users.isNotEmpty) {
+            final foundUserId = users.first['id'];
+            
+            // Get the first serial number for this user
+            final serials = await BackendApiService.executeQuery(
+              'SELECT id FROM SerialNumbers WHERE user_id = ? LIMIT 1',
+              [foundUserId]
+            );
+            
+            if (serials.isNotEmpty) {
+              // Use the found user and serial
+              final foundSerialId = serials.first['id'];
+              
+              // Update payment status in database
+              await _updatePaymentAndSubscription(
+                foundUserId, 
+                foundSerialId, 
+                paymentIntent
+              );
+              return;
+            }
+          }
+        }
+        
+        print('Could not determine user and serial from payment intent');
         return;
       }
       
-      // Update payment status in database
-      final payments = await BackendApiService.executeQuery(
-        'SELECT * FROM Payments WHERE stripe_payment_id = ?',
-        [paymentIntent['id']]
-      );
-      
-      if (payments.isNotEmpty) {
-        await BackendApiService.executeQuery(
-          'UPDATE Payments SET payment_status = ? WHERE stripe_payment_id = ?',
-          ['completed', paymentIntent['id']]
-        );
-      } else {
-        // Create payment record if it doesn't exist
-        final amount = paymentIntent['amount'] / 100.0;
-        final currency = paymentIntent['currency'];
-        String? paymentMethodId;
-        
-        // Safely extract payment method ID
-        if (paymentIntent.containsKey('payment_method')) {
-          paymentMethodId = paymentIntent['payment_method']?.toString();
-        }
-        
-        await BackendApiService.createPayment(
-          userId, 
-          serialId, 
-          amount, 
-          currency, 
-          stripePaymentId: paymentIntent['id'],
-          stripePaymentMethodId: paymentMethodId
-        );
-      }
-      
-      // Create subscription if it doesn't exist
-      final subscriptions = await BackendApiService.executeQuery(
-        'SELECT * FROM Subscriptions WHERE user_id = ? AND serial_id = ? AND status = ?',
-        [userId, serialId, 'active']
-      );
-      
-      if (subscriptions.isEmpty) {
-        final endDate = DateTime.now().add(const Duration(days: 30));
-        await BackendApiService.createSubscription(
-          userId, 
-          serialId, 
-          endDate,
-          stripeSubscriptionId: paymentIntent['id'],
-          stripePriceId: ''
-        );
-      }
+      // Update payment and subscription with the metadata user/serial
+      await _updatePaymentAndSubscription(userId, serialId, paymentIntent);
     } catch (e) {
       print('Error handling payment_intent.succeeded: $e');
+    }
+  }
+  
+  // Helper method to update payment and subscription
+  static Future<void> _updatePaymentAndSubscription(
+    int userId, 
+    int serialId, 
+    Map<String, dynamic> paymentIntent
+  ) async {
+    // Update payment status in database
+    final payments = await BackendApiService.executeQuery(
+      'SELECT * FROM Payments WHERE stripe_payment_id = ?',
+      [paymentIntent['id']]
+    );
+    
+    if (payments.isNotEmpty) {
+      await BackendApiService.executeQuery(
+        'UPDATE Payments SET payment_status = ? WHERE stripe_payment_id = ?',
+        ['completed', paymentIntent['id']]
+      );
+    } else {
+      // Create payment record if it doesn't exist
+      final amount = paymentIntent['amount'] / 100.0;
+      final currency = paymentIntent['currency'];
+      String? paymentMethodId;
+      
+      // Safely extract payment method ID
+      if (paymentIntent.containsKey('payment_method')) {
+        paymentMethodId = paymentIntent['payment_method']?.toString();
+      }
+      
+      await BackendApiService.createPayment(
+        userId, 
+        serialId, 
+        amount, 
+        currency, 
+        stripePaymentId: paymentIntent['id'],
+        stripePaymentMethodId: paymentMethodId
+      );
+    }
+    
+    // Create subscription if it doesn't exist
+    final subscriptions = await BackendApiService.executeQuery(
+      'SELECT * FROM Subscriptions WHERE user_id = ? AND serial_id = ? AND status = ?',
+      [userId, serialId, 'active']
+    );
+    
+    if (subscriptions.isEmpty) {
+      final endDate = DateTime.now().add(const Duration(days: 30));
+      await BackendApiService.createSubscription(
+        userId, 
+        serialId, 
+        endDate,
+        stripeSubscriptionId: paymentIntent['id'],
+        stripePriceId: ''
+      );
     }
   }
   
@@ -281,12 +329,17 @@ class WebhookHandler {
       if (subscriptionId == null) return;
       
       // Get subscription details from Stripe
-      final subscription = StripeService.handleResponse(
-        await http.get(
-          Uri.parse('${StripeService.baseUrl}/subscriptions/$subscriptionId'),
-          headers: StripeService.headers,
-        )
+      final response = await http.get(
+        Uri.parse('${StripeService.baseUrl}/subscriptions/$subscriptionId'),
+        headers: StripeService.headers,
       );
+      
+      if (response.statusCode != 200) {
+        print('Error fetching subscription: ${response.body}');
+        return;
+      }
+      
+      final subscription = jsonDecode(response.body);
       
       final endDate = DateTime.fromMillisecondsSinceEpoch(
         subscription['current_period_end'] * 1000

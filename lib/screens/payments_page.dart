@@ -3,6 +3,7 @@ import '../services/backend_api_service.dart';
 import '../widgets/subscription_banner.dart';
 import 'dart:convert';
 import '../services/stripe_service.dart';
+import '../services/stripe_sync_service.dart';
 import 'package:flutter/material.dart' as material;
 import '../services/users_auth_service.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -17,6 +18,7 @@ class PaymentsPage extends StatefulWidget {
 
 class _PaymentsPageState extends State<PaymentsPage> {
   bool _isLoading = true;
+  bool _isSyncing = false;
   String? _errorMessage;
   List<Map<String, dynamic>> _subscriptions = [];
   List<Map<String, dynamic>> _payments = [];
@@ -25,6 +27,7 @@ class _PaymentsPageState extends State<PaymentsPage> {
   String? _cardLast4;
   final AuthService _authService = AuthService();
   bool _demoMode = false;
+  final StripeSyncService _syncService = StripeSyncService();
   
   @override
   void initState() {
@@ -62,12 +65,25 @@ class _PaymentsPageState extends State<PaymentsPage> {
         _userId = user.id;
       });
       
+      // Get customer ID for this user
+      final customerId = await _getCustomerId();
+      
+      // IMPORTANT: Sync payments with Stripe before fetching local data
+      try {
+        await _syncService.syncUserWithStripe(_userId, customerId);
+        print('Successfully synced payments with Stripe');
+      } catch (e) {
+        print('Error during Stripe sync: $e');
+        // Continue anyway to show whatever data we have
+      }
+      
       // Fetch the user's subscriptions from our API
       try {
         final userSubscriptions = await BackendApiService.getUserSubscriptions(_userId);
         setState(() {
           _subscriptions = userSubscriptions;
         });
+        print('Loaded ${userSubscriptions.length} subscriptions');
       } catch (e) {
         print('Error fetching subscriptions: $e');
         setState(() {
@@ -81,6 +97,7 @@ class _PaymentsPageState extends State<PaymentsPage> {
         setState(() {
           _payments = userPayments;
         });
+        print('Loaded ${userPayments.length} payments');
       } catch (e) {
         print('Error fetching payments: $e');
         setState(() {
@@ -88,23 +105,94 @@ class _PaymentsPageState extends State<PaymentsPage> {
         });
       }
       
-      // Get payment method details for the user (using a simple mock for now)
+      // Get payment method details for the user
+      try {
+        final paymentMethods = await StripeService.getCustomerPaymentMethods(customerId: customerId);
+        if (paymentMethods.isNotEmpty) {
+          final card = paymentMethods.first['card'];
+          setState(() {
+            _cardBrand = card['brand'];
+            _cardLast4 = card['last4'];
+          });
+        }
+      } catch (e) {
+        print('Error fetching payment methods: $e');
+        setState(() {
+          _cardBrand = 'Visa';
+          _cardLast4 = '4242';
+        });
+      }
+      
       setState(() {
-        _cardBrand = 'Visa';
-        _cardLast4 = '4242';
         _isLoading = false;
       });
     } catch (e) {
       setState(() {
         _isLoading = false;
-        _errorMessage = e.toString();
-        _demoMode = true; // Enable demo mode on API errors
-        
-        // Use demo data if API calls fail
-        _subscriptions = _getDemoSubscriptions();
-        _payments = _getDemoPayments();
-        _cardBrand = 'Visa';
-        _cardLast4 = '4242';
+        _errorMessage = 'Error loading data: $e';
+      });
+    }
+  }
+  
+  // Manual sync with Stripe
+  Future<void> _manualSyncWithStripe() async {
+    if (_isSyncing) return;
+    
+    setState(() {
+      _isSyncing = true;
+      _errorMessage = null;
+    });
+    
+    try {
+      final customerId = await _getCustomerId();
+      
+      // Show a loading dialog
+      await showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          title: const Text('Syncing with Stripe'),
+          content: const Row(
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(width: 16),
+              Text('Please wait...'),
+            ],
+          ),
+        ),
+      );
+      
+      // Perform the sync
+      final result = await _syncService.syncUserWithStripe(_userId, customerId);
+      
+      // Close the dialog
+      Navigator.of(context).pop();
+      
+      // Reload data
+      await _loadData();
+      
+      // Show success message
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Sync completed: ${result['payments']} payments and ${result['subscriptions']} subscriptions synced'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      // Close the dialog if it's open
+      if (Navigator.canPop(context)) {
+        Navigator.of(context).pop();
+      }
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error syncing with Stripe: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      setState(() {
+        _isSyncing = false;
       });
     }
   }
@@ -290,7 +378,23 @@ class _PaymentsPageState extends State<PaymentsPage> {
   
   Future<bool> _checkExistingPayment() async {
     try {
-      // Check if there's already a completed payment for this user
+      // Get customer ID
+      final customerId = await _getCustomerId();
+      
+      // Check Stripe for payments directly
+      final stripePayments = await StripeService.getCustomerPayments(customerId);
+      final hasStripePayment = stripePayments.any((payment) => payment['status'] == 'succeeded');
+      
+      if (hasStripePayment) {
+        // Sync with local database
+        await _syncService.syncUserWithStripe(_userId, customerId);
+        
+        // Refresh data
+        await _loadData();
+        return true;
+      }
+      
+      // Check if there's already a completed payment for this user in local DB
       final payments = await BackendApiService.executeQuery(
         'SELECT * FROM Payments WHERE user_id = ? AND payment_status = ?',
         [_userId, 'completed']
@@ -299,47 +403,26 @@ class _PaymentsPageState extends State<PaymentsPage> {
       if (payments.isNotEmpty) {
         // Check if there's an active subscription
         final subscriptions = await BackendApiService.executeQuery(
-          'SELECT * FROM Subscriptions WHERE user_id = ? AND status = ? AND end_date > ?',
-          [_userId, 'active', DateTime.now().toIso8601String()]
+          'SELECT * FROM Subscriptions WHERE user_id = ? AND status = ? AND end_date > NOW()',
+          [_userId, 'active']
         );
         
         if (subscriptions.isEmpty) {
           // Payment exists but no active subscription, create one
-          // Get the serial ID from the payment record or fetch from database
-          int? serialId;
+          final endDate = DateTime.now().add(const Duration(days: 30));
+          await BackendApiService.createSubscription(
+            _userId, 
+            0, // Use 0 for test users
+            endDate,
+            stripeSubscriptionId: payments.first['stripe_payment_id'],
+            stripePriceId: 'price_standard'
+          );
           
-          if (payments.first.containsKey('serial_id') && payments.first['serial_id'] != null) {
-            serialId = payments.first['serial_id'];
-          } else {
-            // Try to get a serial number for this user
-            final serials = await BackendApiService.executeQuery(
-              'SELECT id FROM SerialNumbers WHERE user_id = ? LIMIT 1',
-              [_userId]
-            );
-            
-            if (serials.isNotEmpty) {
-              serialId = serials.first['id'];
-            }
-          }
-          
-          if (serialId != null) {
-            final endDate = DateTime.now().add(const Duration(days: 30));
-            await BackendApiService.createSubscription(
-              _userId, 
-              serialId, 
-              endDate,
-              stripeSubscriptionId: payments.first['stripe_payment_id'],
-              stripePriceId: 'price_standard'
-            );
-            
-            // Refresh data
-            await _loadData();
-            return true;
-          }
-        } else {
-          // Already has active subscription
-          return true;
+          // Refresh data
+          await _loadData();
         }
+        
+        return true;
       }
       
       return false;
@@ -365,6 +448,12 @@ class _PaymentsPageState extends State<PaymentsPage> {
       
       // Set user ID from the current user
       _userId = user.id;
+      
+      // Get customer ID
+      final customerId = await _getCustomerId();
+      
+      // Sync with Stripe first to ensure we have the latest payment data
+      await _syncService.syncUserWithStripe(_userId, customerId);
       
       // Check if user already has a payment
       final hasExistingPayment = await _checkExistingPayment();
@@ -430,12 +519,16 @@ class _PaymentsPageState extends State<PaymentsPage> {
         // Show processing dialog
         await _showPaymentProcessingDialog();
 
-        // 2. Create a payment intent using Stripe service
+        // 2. Create a payment intent using Stripe service with metadata
         print('Creating payment intent...');
         final paymentIntentResult = await StripeService.createPaymentIntent(
           amount: '799', // Amount in smallest currency unit (e.g., pence for GBP)
           currency: 'gbp',
           customerId: customerId,
+          metadata: {
+            'user_id': _userId.toString(),
+            'serial_id': serialId.toString(),
+          },
         );
         print('Payment intent created: ${paymentIntentResult['id']}');
 
@@ -479,24 +572,15 @@ class _PaymentsPageState extends State<PaymentsPage> {
         // Show processing dialog again for backend operations
         await _showPaymentProcessingDialog();
         
-        // Create a subscription in the database
-        final endDate = DateTime.now().add(const Duration(days: 30));
-        final subscription = await BackendApiService.createSubscription(
-          _userId, 
-          serialId, 
-          endDate,
-          stripeSubscriptionId: paymentIntentResult['id'],
-          stripePriceId: 'price_standard'
+        // Verify the payment was successful and create records
+        final success = await _syncService.verifyAndProcessPayment(
+          paymentIntentResult['id'],
+          _userId
         );
         
-        // Create a payment record
-        await BackendApiService.createPayment(
-          _userId,
-          serialId,
-          7.99,
-          'GBP',
-          stripePaymentId: paymentIntentResult['id']
-        );
+        if (!success) {
+          throw Exception('Failed to verify payment with Stripe');
+        }
         
         // Refresh data
         setState(() {
@@ -629,6 +713,12 @@ class _PaymentsPageState extends State<PaymentsPage> {
   
   @override
   Widget build(BuildContext context) {
+    // Check if user has active subscription
+    final hasActiveSubscription = _subscriptions.any((sub) {
+      final endDate = DateTime.parse(sub['end_date']);
+      return sub['status'] == 'active' && endDate.isAfter(DateTime.now());
+    });
+    
     return Scaffold(
       appBar: AppBar(
         title: const Text('Payments'),
@@ -769,6 +859,7 @@ class _PaymentsPageState extends State<PaymentsPage> {
     );
   }
 
+  // Add a manual sync button to the UI in the _buildCurrentPlan method
   Widget _buildCurrentPlan() {
     // Check if there's an active subscription
     final hasActiveSubscription = _subscriptions.any((sub) => 
@@ -852,6 +943,27 @@ class _PaymentsPageState extends State<PaymentsPage> {
                     ),
                   ),
                 ],
+              ),
+              
+              // Add a manual sync button
+              const SizedBox(height: 16),
+              OutlinedButton.icon(
+                onPressed: _isSyncing ? null : _manualSyncWithStripe,
+                icon: _isSyncing 
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF8B5CF6)),
+                        ),
+                      )
+                    : const Icon(Icons.sync, size: 16),
+                label: Text(_isSyncing ? 'Syncing...' : 'Sync with Stripe'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFF8B5CF6),
+                  side: const BorderSide(color: Color(0xFF8B5CF6)),
+                ),
               ),
             ] else ...[
               // Subscribe Now Button
@@ -1263,71 +1375,12 @@ class _PaymentsPageState extends State<PaymentsPage> {
     launchUrl(Uri.parse('mailto:support@example.com?subject=Subscription%20Support'));
   }
 
-  Future<bool> _navigateToStripeCheckout(String clientSecret) async {
-    // This would normally navigate to a Stripe checkout page
-    // For demo purposes, show a mock checkout dialog
-    final result = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Stripe Checkout'),
-        content: const Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.payments, size: 48, color: Color(0xFF8B5CF6)),
-            SizedBox(height: 16),
-            Text(
-              'In a real app, you would be redirected to Stripe to complete your subscription payment.',
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF8B5CF6),
-            ),
-            child: const Text('Complete Payment'),
-          ),
-        ],
-      ),
-    );
-    
-    return result ?? false;
-  }
-
   String _getMonthName(int month) {
     const months = [
       'January', 'February', 'March', 'April', 'May', 'June',
       'July', 'August', 'September', 'October', 'November', 'December'
     ];
     return months[month - 1];
-  }
-
-  Future<Map<String, String>> _getAuthHeaders() async {
-    // Get token from AuthService using the app's AWS-based authentication
-    // instead of Firebase authentication which isn't used in this app
-    final token = await _authService.getToken();
-    
-    // Check if we're in demo mode or token is null
-    if (_demoMode || token == null) {
-      // Return demo headers with a fake token
-      return {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer demo_token',
-        'X-Demo-Mode': 'true'
-      };
-    }
-    
-    // Get the real token for authenticated users
-    return {
-      'Content-Type': 'application/json',
-      'Authorization': 'Bearer $token',
-    };
   }
 
   // Show a payment processing dialog
@@ -1550,4 +1603,3 @@ class _PaymentsPageState extends State<PaymentsPage> {
     }
   }
 }
-

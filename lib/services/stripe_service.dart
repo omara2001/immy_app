@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:immy_app/services/stripe_sync_service.dart';
 import 'backend_api_service.dart';
 
 class StripeService {
@@ -43,6 +44,9 @@ class StripeService {
     // For test/demo users, create an actual Stripe customer instead of using mock IDs
     if (userId == 0 || userId == 999) {
       try {
+        // First, ensure the test user exists in our database
+        await _ensureTestUserExists(userId);
+        
         // Try to find an existing test customer
         final response = await http.get(
           Uri.parse('$baseUrl/customers?email=test@example.com&limit=1'),
@@ -103,6 +107,7 @@ class StripeService {
     required String currency,
     String? customerId,
     String? paymentMethodId,
+    Map<String, String>? metadata,
   }) async {
     final body = {
       'amount': amount,
@@ -116,6 +121,13 @@ class StripeService {
 
     if (customerId != null) body['customer'] = customerId;
     if (paymentMethodId != null) body['payment_method'] = paymentMethodId;
+    
+    // Add metadata if provided
+    if (metadata != null) {
+      metadata.forEach((key, value) {
+        body['metadata[$key]'] = value;
+      });
+    }
 
     final response = await http.post(
       Uri.parse('$baseUrl/payment_intents'),
@@ -150,9 +162,17 @@ class StripeService {
   static Future<Map<String, dynamic>> updatePaymentIntent({
     required String paymentIntentId,
     String? paymentMethodId,
+    Map<String, String>? metadata,
   }) async {
     final body = <String, String>{};
     if (paymentMethodId != null) body['payment_method'] = paymentMethodId;
+    
+    // Add metadata if provided
+    if (metadata != null) {
+      metadata.forEach((key, value) {
+        body['metadata[$key]'] = value;
+      });
+    }
 
     final response = await http.post(
       Uri.parse('$baseUrl/payment_intents/$paymentIntentId'),
@@ -235,13 +255,22 @@ class StripeService {
     required String customerId,
     required String priceId,
     String? paymentMethodId,
+    Map<String, String>? metadata,
   }) async {
     final body = {
       'customer': customerId,
       'items[0][price]': priceId,
     };
+    
     if (paymentMethodId != null) {
       body['default_payment_method'] = paymentMethodId;
+    }
+    
+    // Add metadata if provided
+    if (metadata != null) {
+      metadata.forEach((key, value) {
+        body['metadata[$key]'] = value;
+      });
     }
 
     final response = await http.post(
@@ -283,6 +312,60 @@ class StripeService {
     } else {
       print('Stripe error: ${response.body}');
       throw Exception('Stripe API Error: ${response.statusCode} - ${response.body}');
+    }
+  }
+
+  // Add this new method to check payments in Stripe
+  static Future<List<Map<String, dynamic>>> getCustomerPayments(String customerId) async {
+    try {
+      // Get payment intents for this customer
+      final response = await http.get(
+        Uri.parse('$baseUrl/payment_intents?customer=$customerId&limit=10'),
+        headers: headers,
+      );
+      final result = _handleResponse(response);
+      return List<Map<String, dynamic>>.from(result['data']);
+    } catch (e) {
+      print('Error fetching customer payments from Stripe: $e');
+      return [];
+    }
+  }
+
+  // Add this method to sync payments with Stripe
+  static Future<void> syncPaymentsWithStripe(int userId, String customerId) async {
+    try {
+      // Ensure user exists in database
+      if (userId == 0 || userId == 999) {
+        await _ensureTestUserExists(userId);
+      }
+      
+      // Use the new StripeSyncService for better synchronization
+      final syncService = StripeSyncService();
+      await syncService.syncUserWithStripe(userId, customerId);
+    } catch (e) {
+      print('Error syncing payments with Stripe: $e');
+    }
+  }
+
+  // Add this helper method to ensure test users exist in the database
+  static Future<void> _ensureTestUserExists(int userId) async {
+    try {
+      // Check if user exists
+      final users = await BackendApiService.executeQuery(
+        'SELECT id FROM Users WHERE id = ?',
+        [userId]
+      );
+      
+      if (users.isEmpty) {
+        // Create the test user if it doesn't exist
+        await BackendApiService.executeQuery(
+          'INSERT INTO Users (id, email, name) VALUES (?, ?, ?)',
+          [userId, 'test@example.com', 'Test User']
+        );
+        print('Created test user with ID: $userId');
+      }
+    } catch (e) {
+      print('Error ensuring test user exists: $e');
     }
   }
 }

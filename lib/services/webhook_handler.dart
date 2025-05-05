@@ -2,11 +2,14 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
-import '../services/backend_api_service.dart';
-import '../services/stripe_service.dart';
+import 'backend_api_service.dart';
+import 'stripe_service.dart';
+import 'stripe_sync_service.dart';
 
 class WebhookHandler {
   static const String _endpointSecret = 'whsec_1d3bcb16bbc5da4b89b7d6f31da988f14c5c0d7b2f3cb4586d5f31c2c13f41b6'; // Webhook signing secret
+  static final StripeSyncService _syncService = StripeSyncService();
+  
   // Handle Stripe webhook events
   static Future<Map<String, dynamic>> handleWebhook(
     String payload,
@@ -89,6 +92,40 @@ class WebhookHandler {
     }
   }
   
+  // Get or create a valid serial number for a user
+  static Future<int> _getOrCreateSerialNumber(int userId) async {
+    try {
+      // Try to get existing serial numbers
+      final serials = await BackendApiService.executeQuery(
+        'SELECT id FROM SerialNumbers WHERE user_id = ? LIMIT 1',
+        [userId]
+      );
+      
+      if (serials.isNotEmpty) {
+        return serials.first['id'];
+      }
+      
+      // No serial number found, create one
+      print('No serial number found for user $userId, creating one...');
+      final serialNumber = 'SN-${userId}-${DateTime.now().millisecondsSinceEpoch}';
+      
+      final result = await BackendApiService.executeInsert(
+        'INSERT INTO SerialNumbers (user_id, serial, created_at) VALUES (?, ?, NOW())',
+        [userId, serialNumber]
+      );
+      
+      if (result > 0) {
+        print('Created new serial number: $serialNumber with ID: $result');
+        return result;
+      } else {
+        throw Exception('Failed to create serial number');
+      }
+    } catch (e) {
+      print('Error getting or creating serial number: $e');
+      throw Exception('Failed to get or create serial number: $e');
+    }
+  }
+  
   // Handle payment_intent.succeeded event
   static Future<void> _handlePaymentIntentSucceeded(Map<String, dynamic> paymentIntent) async {
     try {
@@ -96,51 +133,44 @@ class WebhookHandler {
       final userId = int.tryParse(metadata['user_id']?.toString() ?? '');
       final serialId = int.tryParse(metadata['serial_id']?.toString() ?? '');
       
-      if (userId == null || serialId == null) {
-        print('Missing user_id or serial_id in payment intent metadata, trying to find user from payment method');
-        
-        // Try to find the user from the payment method's customer
-        String? customerId;
-        if (paymentIntent.containsKey('customer')) {
-          customerId = paymentIntent['customer']?.toString();
-        }
-        
-        if (customerId != null) {
-          final users = await BackendApiService.executeQuery(
-            'SELECT id FROM Users WHERE stripe_customer_id = ?',
-            [customerId]
-          );
-          
-          if (users.isNotEmpty) {
-            final foundUserId = users.first['id'];
-            
-            // Get the first serial number for this user
-            final serials = await BackendApiService.executeQuery(
-              'SELECT id FROM SerialNumbers WHERE user_id = ? LIMIT 1',
-              [foundUserId]
-            );
-            
-            if (serials.isNotEmpty) {
-              // Use the found user and serial
-              final foundSerialId = serials.first['id'];
-              
-              // Update payment status in database
-              await _updatePaymentAndSubscription(
-                foundUserId, 
-                foundSerialId, 
-                paymentIntent
-              );
-              return;
-            }
-          }
-        }
-        
-        print('Could not determine user and serial from payment intent');
+      // Get customer ID from the payment intent
+      String? customerId;
+      if (paymentIntent.containsKey('customer')) {
+        customerId = paymentIntent['customer']?.toString();
+      }
+      
+      if (customerId == null) {
+        print('No customer ID found in payment intent');
         return;
       }
       
-      // Update payment and subscription with the metadata user/serial
-      await _updatePaymentAndSubscription(userId, serialId, paymentIntent);
+      // Try to find the user from the payment method's customer
+      final users = await BackendApiService.executeQuery(
+        'SELECT id FROM Users WHERE stripe_customer_id = ?',
+        [customerId]
+      );
+      
+      int? foundUserId;
+      
+      if (users.isNotEmpty) {
+        foundUserId = users.first['id'];
+      }
+      
+      // Use provided user ID or found one
+      final finalUserId = userId ?? foundUserId;
+      
+      if (finalUserId == null) {
+        print('Could not determine user ID from payment intent');
+        return;
+      }
+      
+      // Get or create a valid serial number
+      final finalSerialId = serialId ?? await _getOrCreateSerialNumber(finalUserId);
+      
+      // Update payment and subscription
+      await _updatePaymentAndSubscription(finalUserId, finalSerialId, paymentIntent);
+      
+      print('Successfully processed payment intent: ${paymentIntent['id']} for user: $finalUserId');
     } catch (e) {
       print('Error handling payment_intent.succeeded: $e');
     }
@@ -163,6 +193,7 @@ class WebhookHandler {
         'UPDATE Payments SET payment_status = ? WHERE stripe_payment_id = ?',
         ['completed', paymentIntent['id']]
       );
+      print('Updated existing payment: ${paymentIntent['id']}');
     } else {
       // Create payment record if it doesn't exist
       final amount = paymentIntent['amount'] / 100.0;
@@ -182,23 +213,63 @@ class WebhookHandler {
         stripePaymentId: paymentIntent['id'],
         stripePaymentMethodId: paymentMethodId
       );
+      print('Created new payment record: ${paymentIntent['id']}');
     }
     
-    // Create subscription if it doesn't exist
+    // Check for existing active subscription
     final subscriptions = await BackendApiService.executeQuery(
-      'SELECT * FROM Subscriptions WHERE user_id = ? AND serial_id = ? AND status = ?',
-      [userId, serialId, 'active']
+      'SELECT * FROM Subscriptions WHERE user_id = ? AND status = ?',
+      [userId, 'active']
     );
     
     if (subscriptions.isEmpty) {
+      // Create subscription if it doesn't exist
       final endDate = DateTime.now().add(const Duration(days: 30));
-      await BackendApiService.createSubscription(
-        userId, 
-        serialId, 
-        endDate,
-        stripeSubscriptionId: paymentIntent['id'],
-        stripePriceId: ''
+      
+      try {
+        // Verify the serial ID exists
+        final serials = await BackendApiService.executeQuery(
+          'SELECT id FROM SerialNumbers WHERE id = ?',
+          [serialId]
+        );
+        
+        if (serials.isEmpty) {
+          print('Serial ID $serialId not found, getting a valid one...');
+          serialId = await _getOrCreateSerialNumber(userId);
+        }
+        
+        await BackendApiService.createSubscription(
+          userId, 
+          serialId, 
+          endDate,
+          stripeSubscriptionId: paymentIntent['id'],
+          stripePriceId: 'price_standard'
+        );
+        print('Created new subscription record for user: $userId');
+      } catch (e) {
+        print('Error creating subscription: $e');
+        
+        // Fallback: Try direct insert with minimal fields
+        try {
+          print('Failed to create subscription record, using fallback...');
+          final result = await BackendApiService.executeInsert(
+            'INSERT INTO Subscriptions (user_id, serial_id, status, start_date, end_date, stripe_subscription_id, stripe_price_id) VALUES (?, ?, ?, NOW(), ?, ?, ?)',
+            [userId, serialId, 'active', endDate.toIso8601String(), paymentIntent['id'], 'price_standard']
+          );
+          
+          print('Subscription created with ID: $result');
+        } catch (fallbackError) {
+          print('Fallback subscription creation also failed: $fallbackError');
+        }
+      }
+    } else {
+      // Update existing subscription end date
+      final endDate = DateTime.now().add(const Duration(days: 30));
+      await BackendApiService.executeQuery(
+        'UPDATE Subscriptions SET end_date = ?, status = ? WHERE id = ?',
+        [endDate.toIso8601String(), 'active', subscriptions.first['id']]
       );
+      print('Updated existing subscription: ${subscriptions.first['id']}');
     }
   }
   
@@ -210,6 +281,8 @@ class WebhookHandler {
         'UPDATE Payments SET payment_status = ? WHERE stripe_payment_id = ?',
         ['failed', paymentIntent['id']]
       );
+      
+      print('Updated payment status to failed: ${paymentIntent['id']}');
     } catch (e) {
       print('Error handling payment_intent.payment_failed: $e');
     }
@@ -233,16 +306,8 @@ class WebhookHandler {
       
       final userId = users.first['id'];
       
-      // Get user's serial numbers
-      final serials = await BackendApiService.executeQuery(
-        'SELECT * FROM SerialNumbers WHERE user_id = ?',
-        [userId]
-      );
-      
-      if (serials.isEmpty) {
-        print('No serial numbers found for user ID: $userId');
-        return;
-      }
+      // Get or create a valid serial number
+      final serialId = await _getOrCreateSerialNumber(userId);
       
       // Create subscription for each serial number
       final endDate = DateTime.fromMillisecondsSinceEpoch(
@@ -267,14 +332,31 @@ class WebhookHandler {
         print('Error extracting price ID: $e');
       }
       
-      for (final serial in serials) {
+      try {
         await BackendApiService.createSubscription(
           userId, 
-          serial['id'], 
+          serialId, 
           endDate,
           stripeSubscriptionId: subscription['id'],
           stripePriceId: priceId
         );
+        
+        print('Created subscription record for user: $userId');
+      } catch (e) {
+        print('Error creating subscription: $e');
+        
+        // Fallback: Try direct insert with minimal fields
+        try {
+          print('Failed to create subscription record, using fallback...');
+          final result = await BackendApiService.executeInsert(
+            'INSERT INTO Subscriptions (user_id, serial_id, status, start_date, end_date, stripe_subscription_id, stripe_price_id) VALUES (?, ?, ?, NOW(), ?, ?, ?)',
+            [userId, serialId, 'active', endDate.toIso8601String(), subscription['id'], priceId ?? 'price_standard']
+          );
+          
+          print('Subscription created with ID: $result');
+        } catch (fallbackError) {
+          print('Fallback subscription creation also failed: $fallbackError');
+        }
       }
     } catch (e) {
       print('Error handling customer.subscription.created: $e');
@@ -302,6 +384,8 @@ class WebhookHandler {
           'UPDATE Subscriptions SET end_date = ? WHERE stripe_subscription_id = ?',
           [endDate.toIso8601String(), subscription['id']]
         );
+        
+        print('Updated subscription end date: ${subscription['id']}');
       }
     } catch (e) {
       print('Error handling customer.subscription.updated: $e');
@@ -316,6 +400,8 @@ class WebhookHandler {
         'UPDATE Subscriptions SET status = ? WHERE stripe_subscription_id = ?',
         ['canceled', subscription['id']]
       );
+      
+      print('Marked subscription as canceled: ${subscription['id']}');
     } catch (e) {
       print('Error handling customer.subscription.deleted: $e');
     }
@@ -363,10 +449,19 @@ class WebhookHandler {
       
       if (users.isNotEmpty) {
         final userId = users.first['id'];
-        await BackendApiService.executeInsert(
-          'INSERT INTO Payments (user_id, amount, currency, payment_status, stripe_payment_id) VALUES (?, ?, ?, ?, ?)',
-          [userId, amount, currency, 'completed', invoice['payment_intent']]
+        
+        // Get or create a valid serial number
+        final serialId = await _getOrCreateSerialNumber(userId);
+        
+        await BackendApiService.createPayment(
+          userId,
+          serialId,
+          amount,
+          currency,
+          stripePaymentId: invoice['payment_intent']
         );
+        
+        print('Created payment record for invoice: ${invoice['id']}');
       }
     } catch (e) {
       print('Error handling invoice.payment_succeeded: $e');
@@ -384,6 +479,8 @@ class WebhookHandler {
         'UPDATE Subscriptions SET status = ? WHERE stripe_subscription_id = ?',
         ['past_due', subscriptionId]
       );
+      
+      print('Marked subscription as past_due: $subscriptionId');
     } catch (e) {
       print('Error handling invoice.payment_failed: $e');
     }

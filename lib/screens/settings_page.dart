@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../widgets/subscription_banner.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../screens/immy_setup_screen.dart'; // Import the new setup screen
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -48,6 +49,17 @@ class _SettingsPageState extends State<SettingsPage> {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Settings saved successfully')),
     );
+  }
+
+  // Navigate to the Immy setup screen
+  void _navigateToImmySetup() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const ImmySetupScreen()),
+    ).then((_) {
+      // Refresh settings when returning from setup screen
+      _loadSettings();
+    });
   }
 
   // Show dialog to edit learning level
@@ -398,6 +410,82 @@ class _SettingsPageState extends State<SettingsPage> {
           children: [
             const SubscriptionBanner(isActive: true),
             const SizedBox(height: 24),
+            
+            // Immy Setup Section with introductory text - UPDATED
+            Container(
+              width: double.infinity,
+              margin: const EdgeInsets.only(bottom: 24),
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF3E8FF), // Light purple background
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: const Color(0xFFD8B4FE), // Lighter purple border
+                  width: 1,
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFEDE9FE),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Icon(
+                          Icons.emoji_people,
+                          color: Color(0xFF8B5CF6),
+                          size: 24,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      const Expanded(
+                        child: Text(
+                          "Help Immy get to know your family",
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF6D28D9), // Purple text
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  const Text(
+                    "Complete the family setup to personalize Immy's responses for each child. The more Immy knows about your family, the better it can adapt to your children's needs and interests.",
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: Color(0xFF6B7280), // Gray text
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  ElevatedButton.icon(
+                    onPressed: _navigateToImmySetup,
+                    icon: const Icon(Icons.settings_suggest, color: Colors.white),
+                    label: const Text(
+                      'Set Up Your Immy',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF8B5CF6), // purple-600
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      minimumSize: const Size(double.infinity, 48), // Full width button
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            
             // Learning Settings Section
             const Text(
               'Learning Settings',

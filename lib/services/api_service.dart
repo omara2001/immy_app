@@ -6,7 +6,7 @@ import 'package:http_parser/http_parser.dart';
 class ApiService {
   final String baseUrl;
 
-  ApiService({this.baseUrl = 'http://localhost:8000'});
+  ApiService({this.baseUrl = 'https://f3m8ekbvk8.execute-api.eu-west-2.amazonaws.com'});
 
   Map<String, String> get _headers => {
     'Content-Type': 'application/json',
@@ -14,7 +14,7 @@ class ApiService {
   };
 
   // Process files (موجود بس مش محتاجه هنا حسب كلامك)
-  Future<Map<String, dynamic>> processFiles(List<File> files, {String? collectionName}) async {
+  Future<Map<String, dynamic>> processFiles(List<File> files) async {
     final uri = Uri.parse('$baseUrl/process-files');
     final request = http.MultipartRequest('POST', uri);
 
@@ -32,9 +32,7 @@ class ApiService {
       ));
     }
 
-    if (collectionName != null) {
-      request.fields['collection_name'] = collectionName;
-    }
+    request.fields['collection_name'] = 'transcription';
 
     final response = await request.send();
     final responseBody = await response.stream.bytesToString();
@@ -59,8 +57,8 @@ class ApiService {
   }
 
   // Get collection information
-  Future<Map<String, dynamic>> getCollectionInfo(String collectionName) async {
-    final uri = Uri.parse('$baseUrl/collection-info/$collectionName');
+  Future<Map<String, dynamic>> getCollectionInfo() async {
+    final uri = Uri.parse('$baseUrl/collection-info/transcription');
     final response = await http.get(uri, headers: _headers);
 
     if (response.statusCode == 200) {
@@ -71,8 +69,8 @@ class ApiService {
   }
 
   // Get enhancement suggestions
-  Future<Map<String, dynamic>> getEnhancements(String collectionName) async {
-    final uri = Uri.parse('$baseUrl/enhancements/$collectionName');
+  Future<Map<String, dynamic>> getEnhancements() async {
+    final uri = Uri.parse('$baseUrl/enhancements/transcription');
     final response = await http.get(uri, headers: _headers);
 
     if (response.statusCode == 200) {
@@ -83,8 +81,8 @@ class ApiService {
   }
 
   // Get summary of collection
-  Future<Map<String, dynamic>> getSummary(String collectionName) async {
-    final uri = Uri.parse('$baseUrl/summarize/$collectionName');
+  Future<Map<String, dynamic>> getSummary() async {
+    final uri = Uri.parse('$baseUrl/summarize/transcription');
     final response = await http.get(uri, headers: _headers);
 
     if (response.statusCode == 200) {
@@ -95,8 +93,8 @@ class ApiService {
   }
 
   // Get insights from collection
-  Future<Map<String, dynamic>> getInsights(String collectionName, {int? clusters, bool? detailed}) async {
-    var uri = Uri.parse('$baseUrl/insights/$collectionName');
+  Future<Map<String, dynamic>> getInsights({int? clusters, bool? detailed}) async {
+    var uri = Uri.parse('$baseUrl/insights/transcription');
     final queryParams = <String, String>{};
 
     if (clusters != null) {
@@ -119,30 +117,25 @@ class ApiService {
     }
   }
 
-  // Get recent conversations - تعديلها تعتمد على collection-info
-  Future<List<Map<String, dynamic>>> getRecentConversations({String? childId, String? token}) async {
-    final collectionName = childId ?? 'default_collection'; // أو تحط اسم الكوليكشن المناسب
-
-    final info = await getCollectionInfo(collectionName);
+  // Get recent conversations
+  Future<List<Map<String, dynamic>>> getRecentConversations() async {
+    final info = await getCollectionInfo();
     final files = info['files'] as List<dynamic>? ?? [];
 
     return files.map((file) => {
       'id': file,
       'title': file,
-      'timestamp': DateTime.now().toIso8601String(), // مفيش تايمستامب بالظبط فا Placeholder
+      'timestamp': DateTime.now().toIso8601String(),
       'message_count': info['total_documents'] ?? 0,
-      'topics': [], // مفيش توبكس واضحة هنا
+      'topics': [],
       'summary': '',
     }).toList();
   }
 
-  // Get real conversations - تعديلها تعتمد على collection-info و summary
+  // Get real conversations
   Future<List<Map<String, dynamic>>> getRealConversations(String? token) async {
     try {
-      final collectionName = 'default_collection'; // أو بحسب الطفل
-
-      final info = await getCollectionInfo(collectionName);
-
+      final info = await getCollectionInfo();
       final files = info['files'] as List<dynamic>? ?? [];
 
       return files.map((file) => {
@@ -159,11 +152,9 @@ class ApiService {
     }
   }
 
-  // Get conversation details - اعتمد على summarize
+  // Get conversation details
   Future<Map<String, dynamic>> getConversationDetails(String conversationId, {String? token}) async {
-    final summary = await getSummary(conversationId); // اعتبر أن كل CollectionName = ConversationId
+    final summary = await getSummary();
     return summary;
   }
-
-  // No more mock methods needed
 }

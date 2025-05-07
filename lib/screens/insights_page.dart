@@ -1,23 +1,23 @@
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
+import '../services/history_service.dart';
+import 'insights_history_page.dart';
 
 class InsightsPage extends StatefulWidget {
   final ApiService apiService;
-
-  const InsightsPage({
-    super.key,
-    required this.apiService,
-  });
+  
+  const InsightsPage({Key? key, required this.apiService}) : super(key: key);
 
   @override
-  State<InsightsPage> createState() => _InsightsPageState();
+  _InsightsPageState createState() => _InsightsPageState();
 }
 
 class _InsightsPageState extends State<InsightsPage> {
   bool _isLoading = false;
   Map<String, dynamic>? _insightsData;
   String? _errorMessage;
-  final String _collectionName = 'emma_conversations'; // Default collection name
+  final String _collectionName = 'transcription';
+  final HistoryService _historyService = HistoryService();
 
   @override
   void initState() {
@@ -32,9 +32,11 @@ class _InsightsPageState extends State<InsightsPage> {
     });
 
     try {
-      // ✅ هنا نجيب الداتا الحقيقية من الـ API
-      final insights = await widget.apiService.getInsights(_collectionName);
-
+      final insights = await widget.apiService.getInsights();
+      
+      // Save to history
+      await _historyService.saveInsightsHistory(insights);
+      
       setState(() {
         _insightsData = insights;
       });
@@ -51,6 +53,32 @@ class _InsightsPageState extends State<InsightsPage> {
 
   @override
   Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Insights'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.history),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => InsightsHistoryPage(historyService: _historyService),
+                ),
+              );
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _loadInsights,
+          ),
+        ],
+      ),
+      body: _buildBody(),
+    );
+  }
+
+  Widget _buildBody() {
     return SingleChildScrollView(
       child: Padding(
         padding: const EdgeInsets.all(16.0),

@@ -33,7 +33,7 @@ class _RecentConversationsScreenState extends State<RecentConversationsScreen> {
     });
 
     try {
-      final info = await widget.apiService.getCollectionInfo(_collectionName);
+      final info = await widget.apiService.getCollectionInfo();
       final files = info['files'] as List<dynamic>;
       setState(() {
         _fileNames = List<String>.from(files);
@@ -51,7 +51,7 @@ class _RecentConversationsScreenState extends State<RecentConversationsScreen> {
 
   Future<void> _openConversation(String fileName) async {
     try {
-      final summary = await widget.apiService.getSummary(_collectionName);
+      final summary = await widget.apiService.getSummary();
       final content = summary['summary'];
 
       if (!mounted) return;

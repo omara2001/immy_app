@@ -1,23 +1,23 @@
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
+import '../services/history_service.dart';
+import 'coach_history_page.dart';
 
 class CoachPage extends StatefulWidget {
   final ApiService apiService;
-
-  const CoachPage({
-    super.key,
-    required this.apiService,
-  });
+  
+  const CoachPage({Key? key, required this.apiService}) : super(key: key);
 
   @override
-  State<CoachPage> createState() => _CoachPageState();
+  _CoachPageState createState() => _CoachPageState();
 }
 
 class _CoachPageState extends State<CoachPage> {
   bool _isLoading = false;
   Map<String, dynamic>? _coachData;
   String? _errorMessage;
-  final String _collectionName = 'emma_conversations';
+  final String _collectionName = 'transcription';
+  final HistoryService _historyService = HistoryService();
 
   @override
   void initState() {
@@ -32,7 +32,11 @@ class _CoachPageState extends State<CoachPage> {
     });
 
     try {
-      final data = await widget.apiService.getEnhancements(_collectionName);
+      final data = await widget.apiService.getEnhancements();
+      
+      // Save to history
+      await _historyService.saveCoachHistory(data);
+      
       setState(() => _coachData = data);
     } catch (e) {
       setState(() => _errorMessage = 'Failed to load coach data: $e');
@@ -43,6 +47,32 @@ class _CoachPageState extends State<CoachPage> {
 
   @override
   Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Coach'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.history),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => CoachHistoryPage(historyService: _historyService),
+                ),
+              );
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _loadCoachData,
+          ),
+        ],
+      ),
+      body: _buildBody(),
+    );
+  }
+
+  Widget _buildBody() {
     if (_isLoading) return const Center(child: CircularProgressIndicator());
     if (_errorMessage != null) return _buildErrorView();
     if (_coachData == null || _coachData!["recommendations"] == null) {
@@ -88,14 +118,23 @@ class _CoachPageState extends State<CoachPage> {
         RegExp(r'^[a-z]'), (match) => match.group(0)!.toUpperCase());
   }
 
-  Widget _buildItemCard(Map item) {
+  Widget _buildItemCard(dynamic item) {
+    // Check if item is a Map, otherwise convert it to a Map with a default key
+    final Map<String, dynamic> itemMap;
+    if (item is Map) {
+      itemMap = Map<String, dynamic>.from(item);
+    } else {
+      // Handle case where item is a String or other non-Map type
+      itemMap = {'value': item.toString()};
+    }
+
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
-          children: item.entries.map<Widget>((entry) {
+          children: itemMap.entries.map<Widget>((entry) {
             return Padding(
               padding: const EdgeInsets.only(bottom: 4),
               child: Text(

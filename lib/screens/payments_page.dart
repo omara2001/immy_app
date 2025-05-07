@@ -4,6 +4,7 @@ import '../widgets/subscription_banner.dart';
 import 'dart:convert';
 import '../services/stripe_service.dart';
 import '../services/stripe_sync_service.dart';
+import '../services/payment_processor.dart';
 import 'package:flutter/material.dart' as material;
 import '../services/users_auth_service.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -288,7 +289,7 @@ class _PaymentsPageState extends State<PaymentsPage> {
           style: ThemeMode.light,
           appearance: const PaymentSheetAppearance(
             colors: PaymentSheetAppearanceColors(
-              primary: Color(0xFF8B5CF6), // Brand color (purple)
+              primary: Colors.purple,
             ),
           ),
         ),
@@ -449,12 +450,6 @@ class _PaymentsPageState extends State<PaymentsPage> {
       // Set user ID from the current user
       _userId = user.id;
       
-      // Get customer ID
-      final customerId = await _getCustomerId();
-      
-      // Sync with Stripe first to ensure we have the latest payment data
-      await _syncService.syncUserWithStripe(_userId, customerId);
-      
       // Check if user already has a payment
       final hasExistingPayment = await _checkExistingPayment();
       if (hasExistingPayment) {
@@ -463,163 +458,186 @@ class _PaymentsPageState extends State<PaymentsPage> {
         return;
       }
       
+      // Show loading state
       setState(() {
         _isLoading = true;
+        _errorMessage = null;
       });
       
-      // Get user's serial numbers
-      List<Map<String, dynamic>> serials = [];
-      try {
-        serials = await BackendApiService.executeQuery(
-          'SELECT * FROM SerialNumbers WHERE user_id = ?',
-          [_userId]
-        );
-      } catch (e) {
-        print('Error getting serial numbers: $e');
-        // Create a default serial number for testing
-        serials = [{
-          'id': 1,
-          'serial': 'TEST-SERIAL-123',
-          'user_id': _userId
-        }];
-      }
+      // Get or create a serial number for the user
+      final serials = await _getOrCreateSerialNumber();
       
       if (serials.isEmpty) {
-        // Create a default serial number for testing
-        serials = [{
-          'id': 1,
-          'serial': 'TEST-SERIAL-123',
-          'user_id': _userId
-        }];
+        throw Exception('Failed to get or create a serial number');
       }
       
       final serialId = serials.first['id'];
-      print('Using serial ID: $serialId for subscription');
       
-      try {
-        // Check if we're running on Chrome vs Android/iOS
-        final bool isWeb = identical(0, 0.0);
-        
-        if (isWeb) {
-          print('Running on web, using mock payment flow');
-          await _testMockPayment();
-          return;
-        }
-        
-        // 1. Create or get Stripe customer ID
-        final customerId = await _getCustomerId();
-        print('Got customer ID: $customerId');
-
-        // Show a loading indicator
-        setState(() {
-          _isLoading = true;
-          _errorMessage = null;
-        });
-        
-        // Show processing dialog
-        await _showPaymentProcessingDialog();
-
-        // 2. Create a payment intent using Stripe service with metadata
-        print('Creating payment intent...');
-        final paymentIntentResult = await StripeService.createPaymentIntent(
-          amount: '799', // Amount in smallest currency unit (e.g., pence for GBP)
-          currency: 'gbp',
-          customerId: customerId,
-          metadata: {
-            'user_id': _userId.toString(),
-            'serial_id': serialId.toString(),
-          },
+      // Check if we're running on Chrome vs Android/iOS
+      final bool isWeb = identical(0, 0.0);
+      
+      if (isWeb) {
+        print('Running on web, using mock payment flow');
+        await _testMockPayment();
+        return;
+      }
+      
+      // Show processing dialog
+      await _showPaymentProcessingDialog();
+      
+      // Use PaymentProcessor to handle the payment
+      final userEmail = user.email;
+      if (userEmail == null || userEmail.isEmpty) {
+        // Try to get the email from the database
+        final userInfo = await BackendApiService.executeQuery(
+          'SELECT email, name FROM Users WHERE id = ?',
+          [_userId]
         );
-        print('Payment intent created: ${paymentIntentResult['id']}');
-
-        // 3. Get the client secret
-        final clientSecret = paymentIntentResult['client_secret'];
-        print('Client secret: ${clientSecret != null ? 'received' : 'null'}');
         
-        if (clientSecret == null) {
+        if (userInfo.isNotEmpty && userInfo.first['email'] != null) {
+          final customerEmail = userInfo.first['email'].toString();
+          final customerName = userInfo.first['name']?.toString() ?? user.name;
+          
+          print('Using email from database: $customerEmail for user $customerName');
+          
+          final result = await PaymentProcessor.processPayment(
+            userId: _userId,
+            serialId: serialId,
+            amount: 7.99,
+            currency: 'gbp',
+            customerEmail: customerEmail,
+            customerName: customerName,
+          );
+          
           // Close processing dialog
           Navigator.of(context).pop();
-          throw Exception('Failed to create payment intent - client secret is null');
-        }
-
-        // 4. Present the payment sheet
-        print('Initializing payment sheet...');
-        await Stripe.instance.initPaymentSheet(
-          paymentSheetParameters: SetupPaymentSheetParameters(
-            paymentIntentClientSecret: clientSecret,
-            merchantDisplayName: 'Immy App',
-            customerId: customerId,
-            style: ThemeMode.light,
-            appearance: const PaymentSheetAppearance(
-              colors: PaymentSheetAppearanceColors(
-                primary: Color(0xFF8B5CF6), // Brand color (purple)
-              ),
-            ),
-          ),
-        );
-        print('Payment sheet initialized');
-        
-        // Close processing dialog
-        Navigator.of(context).pop();
-
-        // 5. Show the payment sheet
-        print('Presenting payment sheet...');
-        await Stripe.instance.presentPaymentSheet();
-        print('Payment completed successfully');
-        
-        // 6. Payment successful if we get here (exceptions are thrown if payment fails)
-        
-        // Show processing dialog again for backend operations
-        await _showPaymentProcessingDialog();
-        
-        // Verify the payment was successful and create records
-        final success = await _syncService.verifyAndProcessPayment(
-          paymentIntentResult['id'],
-          _userId
-        );
-        
-        if (!success) {
-          throw Exception('Failed to verify payment with Stripe');
-        }
-        
-        // Refresh data
-        setState(() {
-          _isLoading = false;
-        });
-        
-        await _loadData();
-        
-        // Close processing dialog
-        Navigator.of(context).pop();
-        
-        // Show success dialog
-        await _showPaymentSuccessDialog();
-        
-      } catch (e) {
-        // Make sure processing dialog is closed
-        if (Navigator.canPop(context)) {
-          Navigator.of(context).pop();
-        }
-        
-        print('Stripe error details: $e');
-        
-        setState(() {
-          _isLoading = false;
-          if (e is Exception) {
-            _errorMessage = e.toString();
+          
+          if (result['success'] == true) {
+            // Refresh data
+            setState(() {
+              _isLoading = false;
+            });
+            
+            await _loadData();
+            
+            // Show success dialog
+            await _showPaymentSuccessDialog();
           } else {
-            _errorMessage = 'Failed to process payment: $e';
+            // Handle error
+            setState(() {
+              _isLoading = false;
+              _errorMessage = 'Payment failed: ${result['error']}';
+            });
+            
+            // Show error dialog
+            await _showStripeErrorDialog(result['error']);
           }
-        });
+        } else {
+          // No email found in database, show error
+          Navigator.of(context).pop(); // Close dialog
+          
+          setState(() {
+            _isLoading = false;
+            _errorMessage = 'Missing email address. Please update your profile.';
+          });
+        }
+      } else {
+        // We have the email from the user object
+        print('Using email from user object: $userEmail');
         
-        // Show detailed error dialog
-        await _showStripeErrorDialog(e);
+        final result = await PaymentProcessor.processPayment(
+          userId: _userId,
+          serialId: serialId,
+          amount: 7.99,
+          currency: 'gbp',
+          customerEmail: userEmail,
+          customerName: user.name,
+        );
+        
+        // Close processing dialog
+        Navigator.of(context).pop();
+        
+        if (result['success'] == true) {
+          // Refresh data
+          setState(() {
+            _isLoading = false;
+          });
+          
+          await _loadData();
+          
+          // Show success dialog
+          await _showPaymentSuccessDialog();
+        } else {
+          // Handle error
+          setState(() {
+            _isLoading = false;
+            _errorMessage = 'Payment failed: ${result['error']}';
+          });
+          
+          // Show error dialog
+          await _showStripeErrorDialog(result['error']);
+        }
       }
     } catch (e) {
+      // Make sure processing dialog is closed
+      if (Navigator.canPop(context)) {
+        Navigator.of(context).pop();
+      }
+      
       setState(() {
         _errorMessage = 'Failed to process subscription: ${e.toString()}';
         _isLoading = false;
       });
+      
+      // Show error dialog
+      await _showStripeErrorDialog(e);
+    }
+  }
+  
+  // Helper method to get or create a serial number
+  Future<List<Map<String, dynamic>>> _getOrCreateSerialNumber() async {
+    try {
+      // Try to get existing serial numbers
+      List<Map<String, dynamic>> serials = await BackendApiService.executeQuery(
+        'SELECT * FROM SerialNumbers WHERE user_id = ?',
+        [_userId]
+      );
+      
+      if (serials.isNotEmpty) {
+        return serials;
+      }
+      
+      // Create a new serial number
+      final serialNumber = 'SN-${_userId}-${DateTime.now().millisecondsSinceEpoch}';
+      final result = await BackendApiService.executeInsert(
+        'INSERT INTO SerialNumbers (user_id, serial, created_at) VALUES (?, ?, NOW())',
+        [_userId, serialNumber]
+      );
+      
+      if (result > 0) {
+        // Fetch the newly created serial
+        serials = await BackendApiService.executeQuery(
+          'SELECT * FROM SerialNumbers WHERE id = ?',
+          [result]
+        );
+        
+        return serials;
+      }
+      
+      // Fallback - create a mock serial
+      return [{
+        'id': 1,
+        'serial': 'TEST-SERIAL-123',
+        'user_id': _userId
+      }];
+    } catch (e) {
+      print('Error getting or creating serial number: $e');
+      // Return a fallback serial number
+      return [{
+        'id': 1,
+        'serial': 'TEST-SERIAL-123',
+        'user_id': _userId
+      }];
     }
   }
   
@@ -715,7 +733,8 @@ class _PaymentsPageState extends State<PaymentsPage> {
   Widget build(BuildContext context) {
     // Check if user has active subscription
     final hasActiveSubscription = _subscriptions.any((sub) {
-      final endDate = DateTime.parse(sub['end_date']);
+      if (sub['end_date'] == null) return false;
+      final endDate = _parseDateTime(sub['end_date']);
       return sub['status'] == 'active' && endDate.isAfter(DateTime.now());
     });
     
@@ -864,13 +883,21 @@ class _PaymentsPageState extends State<PaymentsPage> {
     // Check if there's an active subscription
     final hasActiveSubscription = _subscriptions.any((sub) => 
       sub['status'] == 'active' && 
-      DateTime.parse(sub['end_date'].toString()).isAfter(DateTime.now())
+      _parseDateTime(sub['end_date']).isAfter(DateTime.now())
     );
     
     // Get the next payment date
-    final DateTime nextPaymentDate = _payments.isNotEmpty
-      ? DateTime.parse(_payments.first['created_at'].toString()).add(const Duration(days: 30))
-      : DateTime.now().add(const Duration(days: 30));
+    DateTime nextPaymentDate;
+    if (_payments.isNotEmpty) {
+      try {
+        nextPaymentDate = _parseDateTime(_payments.first['created_at']).add(const Duration(days: 30));
+      } catch (e) {
+        print('Error calculating next payment date: $e');
+        nextPaymentDate = DateTime.now().add(const Duration(days: 30));
+      }
+    } else {
+      nextPaymentDate = DateTime.now().add(const Duration(days: 30));
+    }
       
     // Format the next payment date as Month Day, Year
     final String nextPaymentDateFormatted = 
@@ -1204,7 +1231,7 @@ class _PaymentsPageState extends State<PaymentsPage> {
             padding: const EdgeInsets.all(16.0),
             child: Column(
               children: _payments.map((payment) {
-                final date = DateTime.parse(payment['created_at'].toString());
+                final date = _parseDateTime(payment['created_at']);
                 final dateFormatted = '${_getMonthName(date.month)} ${date.day}, ${date.year}';
                 
                 return Padding(
@@ -1229,9 +1256,9 @@ class _PaymentsPageState extends State<PaymentsPage> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(
+                            const Text(
                               'Monthly Subscription',
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontWeight: FontWeight.w500,
                                 fontSize: 14,
                               ),
@@ -1273,11 +1300,11 @@ class _PaymentsPageState extends State<PaymentsPage> {
             child: Center(
               child: TextButton.icon(
                 onPressed: () {
-                  // View all payment history (could navigate to a detailed screen)
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Payment history feature coming soon'),
-                    ),
+                  // Navigate to payment history screen
+                  Navigator.pushNamed(
+                    context,
+                    '/payment_history',
+                    arguments: {'userId': _userId}
                   );
                 },
                 icon: const Icon(Icons.history, size: 16),
@@ -1555,27 +1582,75 @@ class _PaymentsPageState extends State<PaymentsPage> {
       // Simulate processing time
       await Future.delayed(const Duration(seconds: 2));
       
-      // Create mock payment data
-      final paymentData = {
-        'id': 'pi_mock_${DateTime.now().millisecondsSinceEpoch}',
-        'amount': 799,
-        'currency': 'gbp',
-        'status': 'succeeded',
-        'created_at': DateTime.now().toIso8601String(),
-      };
+      // Create mock payment in the database with correct fields
+      final mockPaymentId = 'pi_mock_${DateTime.now().millisecondsSinceEpoch}';
+      final paymentAmount = 7.99;
+      final paymentCurrency = 'gbp';
+      final now = DateTime.now();
+      
+      try {
+        // Create payment record in database
+        await BackendApiService.createPayment(
+          _userId,
+          serialId,
+          paymentAmount,
+          paymentCurrency,
+          stripePaymentId: mockPaymentId,
+          stripePaymentMethodId: 'pm_mock_card_visa'
+        );
+        
+        print('Created mock payment record in database');
+      } catch (e) {
+        print('Error creating mock payment in database: $e');
+        // Continue anyway - mock data will still show in UI
+      }
       
       // Create a mock subscription
-      final endDate = DateTime.now().add(const Duration(days: 30));
+      final endDate = now.add(const Duration(days: 30));
+      
+      try {
+        // Create subscription in database
+        await BackendApiService.createSubscription(
+          _userId,
+          serialId,
+          endDate,
+          stripeSubscriptionId: 'sub_mock_${now.millisecondsSinceEpoch}',
+          stripePriceId: 'price_standard'
+        );
+        
+        print('Created mock subscription record in database');
+      } catch (e) {
+        print('Error creating mock subscription in database: $e');
+      }
+      
+      // Create payment data for UI
+      final paymentData = {
+        'id': mockPaymentId,
+        'amount': paymentAmount,
+        'currency': paymentCurrency,
+        'status': 'succeeded',
+        'created_at': now.toIso8601String(),
+      };
+      
+      // Create a mock subscription for UI
       final mockSubscription = {
-        'id': DateTime.now().millisecondsSinceEpoch,
+        'id': now.millisecondsSinceEpoch,
         'user_id': _userId,
         'serial_id': serialId,
-        'start_date': DateTime.now().toIso8601String(),
+        'start_date': now.toIso8601String(),
         'end_date': endDate.toIso8601String(),
         'status': 'active',
-        'stripe_subscription_id': 'sub_mock_${DateTime.now().millisecondsSinceEpoch}',
+        'stripe_subscription_id': 'sub_mock_${now.millisecondsSinceEpoch}',
         'stripe_price_id': 'price_standard',
       };
+      
+      // Set payment method info if none exists
+      if (_cardBrand == null || _cardLast4 == null) {
+        setState(() {
+          _cardBrand = 'Visa';
+          _cardLast4 = '4242';
+        });
+      }
       
       // Close processing dialog
       Navigator.of(context).pop();
@@ -1601,5 +1676,19 @@ class _PaymentsPageState extends State<PaymentsPage> {
         _errorMessage = 'Mock payment test failed: $e';
       });
     }
+  }
+
+  // Add a helper method to safely parse DateTime
+  DateTime _parseDateTime(dynamic dateValue) {
+    if (dateValue is DateTime) {
+      return dateValue;
+    } else if (dateValue is String) {
+      try {
+        return DateTime.parse(dateValue);
+      } catch (e) {
+        print('Error parsing date: $e');
+      }
+    }
+    return DateTime.now(); // Fallback
   }
 }

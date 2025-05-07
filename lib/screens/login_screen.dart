@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../services/users_auth_service.dart';
+import '../services/theme_provider.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -13,7 +15,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final _emailController = TextEditingController(text: 'test@example.com');
   final _passwordController = TextEditingController(text: 'password123');
   final _authService = AuthService();
-  
+
   bool _isLoading = false;
   String? _errorMessage;
   bool _obscurePassword = true;
@@ -29,22 +31,22 @@ class _LoginScreenState extends State<LoginScreen> {
     if (!_formKey.currentState!.validate()) {
       return;
     }
-    
+
     setState(() {
       _isLoading = true;
       _errorMessage = null;
     });
-    
+
     try {
       final email = _emailController.text.trim();
       final password = _passwordController.text;
-      
+
       print("Login attempt with: $email / $password");
-      
+
       final user = await _authService.login(email, password);
-      
+
       print("Login successful. User: ${user.name}, isAdmin: ${user.isAdmin}");
-      
+
       if (mounted) {
         // If admin, navigate to admin dashboard
         if (user.isAdmin) {
@@ -72,8 +74,10 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final themeProvider = Provider.of<ThemeProvider>(context);
+    final isDarkMode = themeProvider.isDarkMode;
+
     return Scaffold(
-      backgroundColor: Colors.white,
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
@@ -87,26 +91,28 @@ class _LoginScreenState extends State<LoginScreen> {
                   height: 120,
                 ),
                 const SizedBox(height: 24),
-                
+
                 // Title
-                const Text(
+                Text(
                   'Welcome Back!',
                   style: TextStyle(
                     fontSize: 24,
                     fontWeight: FontWeight.bold,
-                    color: Color(0xFF8B5CF6), // purple-600
+                    color: const Color(0xFF8B5CF6), // purple-600
                   ),
                 ),
                 const SizedBox(height: 8),
-                const Text(
+                Text(
                   'Sign in to continue to Immy App',
                   style: TextStyle(
                     fontSize: 16,
-                    color: Color(0xFF6B7280), // gray-500
+                    color: Theme.of(context).brightness == Brightness.dark
+                        ? Colors.white70
+                        : const Color(0xFF6B7280), // gray-500
                   ),
                 ),
                 const SizedBox(height: 32),
-                
+
                 // Error message
                 if (_errorMessage != null)
                   Container(
@@ -135,7 +141,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                   ),
                 if (_errorMessage != null) const SizedBox(height: 16),
-                
+
                 // Login form
                 Form(
                   key: _formKey,
@@ -159,7 +165,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         },
                       ),
                       const SizedBox(height: 16),
-                      
+
                       // Password field
                       TextFormField(
                         controller: _passwordController,
@@ -188,7 +194,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         },
                       ),
                       const SizedBox(height: 8),
-                      
+
                       // Forgot password
                       Align(
                         alignment: Alignment.centerRight,
@@ -200,7 +206,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                       ),
                       const SizedBox(height: 16),
-                      
+
                       // Login button
                       SizedBox(
                         width: double.infinity,
@@ -233,15 +239,17 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                       ),
                       const SizedBox(height: 24),
-                      
+
                       // Register link
                       Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          const Text(
+                          Text(
                             'Don\'t have an account?',
                             style: TextStyle(
-                              color: Color(0xFF6B7280), // gray-500
+                              color: Theme.of(context).brightness == Brightness.dark
+                                  ? Colors.white70
+                                  : const Color(0xFF6B7280), // gray-500
                             ),
                           ),
                           TextButton(

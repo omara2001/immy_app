@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:immy_app/services/stripe_sync_service.dart';
 import 'backend_api_service.dart';
+import 'package:flutter_stripe/flutter_stripe.dart';
 
 class StripeService {
   static const String _defaultSecretKey = 'sk_test_51R00wJP1l4vbhTn5Xfe5zWNZrVtHyA7EeP1REpL92RXarOtVRelDEPPHBNdvEdhWRFMd66CWmOLd2cCI2ZF6aAls00jM6x0sdT';
@@ -41,64 +42,76 @@ class StripeService {
   }
 
   static Future<String> getOrCreateCustomerId(int userId) async {
-    // For test/demo users, create an actual Stripe customer instead of using mock IDs
-    if (userId == 0 || userId == 999) {
-      try {
-        // First, ensure the test user exists in our database
-        await _ensureTestUserExists(userId);
-        
-        // Try to find an existing test customer
-        final response = await http.get(
-          Uri.parse('$baseUrl/customers?email=test@example.com&limit=1'),
-          headers: headers,
-        );
-        final result = _handleResponse(response);
-        
-        if (result['data'] != null && result['data'].isNotEmpty) {
-          return result['data'][0]['id'];
-        }
-        
-        // Create a real test customer in Stripe
-        final newCustomer = await createCustomer(
-          email: 'test@example.com',
-          name: 'Test User',
-        );
-        return newCustomer['id'];
-      } catch (e) {
-        print('Error creating test customer: $e');
-        throw Exception('Failed to create test customer in Stripe');
+    try {
+      // Get user information from database
+      final userRows = await BackendApiService.executeQuery(
+        'SELECT id, email, name, stripe_customer_id FROM Users WHERE id = ?',
+        [userId],
+      );
+      
+      if (userRows.isEmpty) {
+        throw Exception('User not found');
       }
+
+      final user = userRows.first;
+      final currentCustomerId = user['stripe_customer_id'];
+      final userEmail = user['email'];
+      final userName = user['name'];
+      
+      if (userEmail == null || userEmail.toString().isEmpty) {
+        throw Exception('User email not found');
+      }
+
+      // If user already has a customer ID in our database, use it
+      if (currentCustomerId != null && currentCustomerId.toString().isNotEmpty) {
+        print('Using existing Stripe customer ID: $currentCustomerId for user: $userEmail');
+        return currentCustomerId;
+      }
+
+      print('Creating new Stripe customer for user: $userEmail');
+      
+      // Check if a customer with this email already exists in Stripe
+      final existingCustomerResponse = await http.get(
+        Uri.parse('$baseUrl/customers?email=${Uri.encodeComponent(userEmail)}&limit=1'),
+        headers: headers,
+      );
+      
+      final existingCustomerResult = _handleResponse(existingCustomerResponse);
+      
+      // If customer exists in Stripe but not linked in our database, use that customer
+      if (existingCustomerResult['data'] != null && existingCustomerResult['data'].isNotEmpty) {
+        final existingCustomerId = existingCustomerResult['data'][0]['id'];
+        
+        // Update user with the existing customer ID
+        await BackendApiService.executeQuery(
+          'UPDATE Users SET stripe_customer_id = ? WHERE id = ?',
+          [existingCustomerId, userId],
+        );
+        
+        print('Found existing Stripe customer: $existingCustomerId for email: $userEmail');
+        return existingCustomerId;
+      }
+      
+      // Create a new customer in Stripe
+      final newCustomer = await createCustomer(
+        email: userEmail,
+        name: userName,
+      );
+
+      final newCustomerId = newCustomer['id'];
+      print('Created new Stripe customer: $newCustomerId for user: $userEmail');
+
+      // Update user record with new customer ID
+      await BackendApiService.executeQuery(
+        'UPDATE Users SET stripe_customer_id = ? WHERE id = ?',
+        [newCustomerId, userId],
+      );
+
+      return newCustomerId;
+    } catch (e) {
+      print('Error in getOrCreateCustomerId: $e');
+      throw Exception('Failed to get or create Stripe customer: $e');
     }
-
-    final userRows = await BackendApiService.executeQuery(
-      'SELECT id, email, name, stripe_customer_id FROM Users WHERE id = ?',
-      [userId],
-    );
-    
-    if (userRows.isEmpty) {
-      throw Exception('User not found');
-    }
-
-    final user = userRows.first;
-    final currentCustomerId = user['stripe_customer_id'];
-
-    if (currentCustomerId != null && currentCustomerId.toString().isNotEmpty) {
-      return currentCustomerId;
-    }
-
-    final newCustomer = await createCustomer(
-      email: user['email'],
-      name: user['name'],
-    );
-
-    final newCustomerId = newCustomer['id'];
-
-    await BackendApiService.executeQuery(
-      'UPDATE Users SET stripe_customer_id = ? WHERE id = ?',
-      [newCustomerId, userId],
-    );
-
-    return newCustomerId;
   }
 
   // ========== PAYMENT INTENT ==========

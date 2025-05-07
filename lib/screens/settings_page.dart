@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../widgets/subscription_banner.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../screens/immy_setup_screen.dart'; // Import the new setup screen
+import '../services/theme_provider.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -16,7 +18,7 @@ class _SettingsPageState extends State<SettingsPage> {
   String _childInterests = 'Space, Animals, Music';
   String _bedtimeHours = '7:30 PM - 7:00 AM';
   bool _isLoading = true;
-  
+
   // This would come from your authentication system in a real app
   final String _userEmail = 'emma@example.com';
 
@@ -45,10 +47,12 @@ class _SettingsPageState extends State<SettingsPage> {
     await prefs.setString('learningLevel', _learningLevel);
     await prefs.setString('childInterests', _childInterests);
     await prefs.setString('bedtimeHours', _bedtimeHours);
-    
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Settings saved successfully')),
-    );
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Settings saved successfully')),
+      );
+    }
   }
 
   // Navigate to the Immy setup screen
@@ -70,7 +74,7 @@ class _SettingsPageState extends State<SettingsPage> {
       'Age 8-10 (Elementary)',
       'Age 11-13 (Middle School)'
     ];
-    
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -101,7 +105,7 @@ class _SettingsPageState extends State<SettingsPage> {
   // Show dialog to edit child's interests
   void _showInterestsDialog() {
     final TextEditingController controller = TextEditingController(text: _childInterests);
-    
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -136,7 +140,7 @@ class _SettingsPageState extends State<SettingsPage> {
   // Show dialog to edit bedtime hours
   void _showBedtimeDialog() {
     final TextEditingController controller = TextEditingController(text: _bedtimeHours);
-    
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -229,7 +233,7 @@ class _SettingsPageState extends State<SettingsPage> {
     bool dailyInsights = true;
     bool weeklyReports = true;
     bool appUpdates = true;
-    
+
     showDialog(
       context: context,
       builder: (context) => StatefulBuilder(
@@ -401,7 +405,7 @@ class _SettingsPageState extends State<SettingsPage> {
     if (_isLoading) {
       return const Center(child: CircularProgressIndicator());
     }
-    
+
     return SingleChildScrollView(
       child: Padding(
         padding: const EdgeInsets.all(16.0),
@@ -410,7 +414,7 @@ class _SettingsPageState extends State<SettingsPage> {
           children: [
             const SubscriptionBanner(isActive: true),
             const SizedBox(height: 24),
-            
+
             // Immy Setup Section with introductory text - UPDATED
             Container(
               width: double.infinity,
@@ -485,7 +489,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 ],
               ),
             ),
-            
+
             // Learning Settings Section
             const Text(
               'Learning Settings',
@@ -502,7 +506,7 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
             ),
             const SizedBox(height: 16),
-            
+
             // Learning Level
             InkWell(
               onTap: _showLearningLevelDialog,
@@ -514,7 +518,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 Icons.psychology,
               ),
             ),
-            
+
             // Child's Interests
             InkWell(
               onTap: _showInterestsDialog,
@@ -526,7 +530,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 Icons.favorite,
               ),
             ),
-            
+
             // Bedtime Mode
             InkWell(
               onTap: _showBedtimeDialog,
@@ -538,9 +542,58 @@ class _SettingsPageState extends State<SettingsPage> {
                 Icons.nightlight_round,
               ),
             ),
-            
+
+            // Dark Mode
+            Consumer<ThemeProvider>(
+              builder: (context, themeProvider, _) => Padding(
+                padding: const EdgeInsets.symmetric(vertical: 12.0),
+                child: Row(
+                  children: [
+                    CircleAvatar(
+                      radius: 16,
+                      backgroundColor: const Color(0xFFF3E8FF), // purple-100
+                      child: Icon(
+                        themeProvider.isDarkMode ? Icons.dark_mode : Icons.light_mode,
+                        size: 16,
+                        color: const Color(0xFF8B5CF6), // purple-600
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Dark Mode',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w500,
+                              fontSize: 14,
+                            ),
+                          ),
+                          Text(
+                            themeProvider.isDarkMode ? 'On' : 'Off',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: Color(0xFF6B7280), // gray-500
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Switch(
+                      value: themeProvider.isDarkMode,
+                      onChanged: (_) {
+                        themeProvider.toggleTheme();
+                      },
+                      activeColor: const Color(0xFF8B5CF6), // purple-600
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
             const SizedBox(height: 24),
-            
+
             // Privacy & Security Section
             const Text(
               'Privacy & Security',
@@ -557,7 +610,7 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
             ),
             const SizedBox(height: 16),
-            
+
             // Data Privacy
             InkWell(
               onTap: _showDataPrivacySettings,
@@ -569,7 +622,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 Icons.shield,
               ),
             ),
-            
+
             // Notifications
             InkWell(
               onTap: _showNotificationSettings,
@@ -581,9 +634,9 @@ class _SettingsPageState extends State<SettingsPage> {
                 Icons.notifications,
               ),
             ),
-            
+
             const SizedBox(height: 24),
-            
+
             // Help & Support
             InkWell(
               onTap: _showHelpAndSupport,
@@ -609,9 +662,9 @@ class _SettingsPageState extends State<SettingsPage> {
                 ],
               ),
             ),
-            
+
             const SizedBox(height: 16),
-            
+
             // Sign Out
             InkWell(
               onTap: _signOut,

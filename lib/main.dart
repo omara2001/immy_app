@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:provider/provider.dart';
 import 'screens/register_screen.dart';
 import 'screens/terms_of_service_page.dart';
 import 'screens/home_page.dart';
@@ -15,56 +16,70 @@ import 'services/serial_service.dart';
 import 'services/api_service.dart';
 import 'services/auth_service.dart' as admin_auth;
 import 'services/users_auth_service.dart' as user_auth;
-import 'services/backend_api_service.dart'; 
+import 'services/backend_api_service.dart';
+import 'services/theme_provider.dart';
 import 'package:flutter_stripe/flutter_stripe.dart';
 import 'services/stripe_service.dart';
+import 'services/payment_processor.dart';
 import 'screens/subscription_screen.dart';
 import 'dart:async';
 import 'screens/conversation_detail_screen.dart';
+import 'screens/payment_history_screen.dart';
+import 'screens/learning_journey_screen.dart';
+import 'screens/story_time_screen.dart';
 
 void main() async {
   // Ensure Flutter is initialized
   WidgetsFlutterBinding.ensureInitialized();
-  
+
   // Only initialize essential services for UI
   final serialService = SerialService();
   final apiService = ApiService();
   final adminAuthService = admin_auth.AuthService();
   final userAuthService = user_auth.AuthService();
-  
+
   // Initialize Stripe early
   try {
-    Stripe.publishableKey = 'pk_test_51R00wJP1l4vbhTn5ncEmkHyXbk0Csb22wsmqYsYbAssUvPIsR3dldovfgPlqsZzcf3LtIhrOKqAVWITKfYR2fFx600KQdXd1p2';
-    
-    // Apply settings with platform-specific configuration
+    final publishableKey = 'pk_test_51R00wJP1l4vbhTn5ncEmkHyXbk0Csb22wsmqYsYbAssUvPIsR3dldovfgPlqsZzcf3LtIhrOKqAVWITKfYR2fFx600KQdXd1p2';
+
+    // Initialize Stripe
+    Stripe.publishableKey = publishableKey;
     await Stripe.instance.applySettings();
-    
-    // Initialize Stripe service
+
+    // Initialize PaymentProcessor
+    await PaymentProcessor.initialize(publishableKey);
+
+    // Initialize Stripe service for backend operations
     StripeService.initialize(
       secretKey: 'sk_test_51R00wJP1l4vbhTn5Xfe5zWNZrVtHyA7EeP1REpL92RXarOtVRelDEPPHBNdvEdhWRFMd66CWmOLd2cCI2ZF6aAls00jM6x0sdT',
-      publishableKey: Stripe.publishableKey,
-      testMode: false, // Change this to false to use real API calls with test keys
+      publishableKey: publishableKey,
+      testMode: false, // Using test keys in live mode
     );
-    
-    print('Stripe initialized successfully with test keys in live mode');
+
+    print('Stripe and PaymentProcessor initialized successfully with test keys');
   } catch (e) {
     print('Error initializing Stripe (will use mock data): $e');
-    // Initialize Stripe service in test mode anyway to ensure mocks work
+    // Initialize in test mode anyway to ensure mocks work
     StripeService.initialize(
       secretKey: 'sk_test_mock',
       publishableKey: 'pk_test_mock',
       testMode: true,
     );
   }
-  
+
   // Start the app immediately
-  runApp(MyApp(
-    serialService: serialService,
-    apiService: apiService,
-    authService: adminAuthService, 
-    usersAuthService: userAuthService,
-  ));
-  
+  runApp(
+    ChangeNotifierProvider(
+      create: (_) => ThemeProvider(),
+      child: MyApp(
+        serialService: serialService,
+        apiService: apiService,
+        authService: adminAuthService,
+        usersAuthService: userAuthService,
+      ),
+    ),
+  );
+
   // Initialize database and other services in the background
   Future.microtask(() async {
     // Initialize BackendApiService first
@@ -74,7 +89,7 @@ void main() async {
     } catch (e) {
       print('Error initializing database connection: $e');
     }
-    
+
     // Initialize admin users
     try {
       await adminAuthService.initializeAdminUser();
@@ -82,7 +97,7 @@ void main() async {
     } catch (e) {
       print('Error initializing admin user: $e');
     }
-    
+
     try {
       await userAuthService.initializeAdminUser();
       print('User admin initialized successfully');
@@ -97,9 +112,9 @@ class MyApp extends StatefulWidget {
   final ApiService apiService;
   final admin_auth.AuthService authService;
   final user_auth.AuthService usersAuthService;
-  
+
   const MyApp({
-    super.key, 
+    super.key,
     required this.serialService,
     required this.apiService,
     required this.authService,
@@ -137,29 +152,12 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
+    final themeProvider = Provider.of<ThemeProvider>(context);
     return MaterialApp(
       title: 'Immy App',
-      theme: ThemeData(
-        primarySwatch: Colors.purple,
-        primaryColor: const Color(0xFF8B5CF6), // purple-600
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF8B5CF6),
-          primary: const Color(0xFF8B5CF6),
-        ),
-        scaffoldBackgroundColor: const Color(0xFFF9FAFB), // gray-50
-        appBarTheme: const AppBarTheme(
-          backgroundColor: Color(0xFF8B5CF6), // purple-600
-          foregroundColor: Colors.white,
-        ),
-        cardTheme: CardTheme(
-          elevation: 0,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
-            side: const BorderSide(color: Color(0xFFE5E7EB)), // gray-200
-          ),
-        ),
-        useMaterial3: true,
-      ),
+      theme: themeProvider.lightTheme,
+      darkTheme: themeProvider.darkTheme,
+      themeMode: themeProvider.themeMode,
       routes: {
         '/': (context) => const SplashScreen(),
         '/login': (context) => const LoginScreen(),
@@ -216,6 +214,22 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
             authService: widget.authService,
           );
         },
+        '/payment_history': (context) {
+          final args = ModalRoute.of(context)!.settings.arguments as Map<String, dynamic>?;
+          if (args == null) {
+            // Handle case when no arguments are provided
+            return const Scaffold(
+              body: Center(
+                child: Text('Error: Missing user information'),
+              ),
+            );
+          }
+          return PaymentHistoryScreen(
+            userId: args['userId'],
+          );
+        },
+        '/learning-journey': (context) => const LearningJourneyScreen(),
+        '/story-time': (context) => const StoryTimeScreen(),
       },
       initialRoute: '/',
       debugShowCheckedModeBanner: false,
@@ -232,7 +246,7 @@ class SplashScreen extends StatefulWidget {
 
 class _SplashScreenState extends State<SplashScreen> {
   final usersAuthService = user_auth.AuthService();
-  
+
   @override
   void initState() {
     super.initState();
@@ -249,22 +263,22 @@ class _SplashScreenState extends State<SplashScreen> {
         prefsCompleter.completeError(e);
       }
     );
-    
+
     // Shorter splash screen delay
     await Future.delayed(const Duration(seconds: 1));
-    
+
     if (!mounted) return;
-    
+
     // Add a safety timeout to ensure the app doesn't hang
     bool authCheckComplete = false;
-    
+
     // Set up a safety timeout (reduced to 3 seconds)
     Future.delayed(const Duration(seconds: 3), () {
       if (!mounted || authCheckComplete) return;
       print("Auth check timeout - defaulting to login screen");
       Navigator.of(context).pushReplacementNamed('/login');
     });
-    
+
     try {
       // Get SharedPreferences first
       final prefs = await prefsCompleter.future.timeout(
@@ -274,7 +288,7 @@ class _SplashScreenState extends State<SplashScreen> {
           throw TimeoutException("SharedPreferences timeout");
         }
       );
-      
+
       // Check if this is the first time the app is running
       final firstRun = prefs.getBool('first_run') ?? true;
       if (firstRun) {
@@ -287,7 +301,7 @@ class _SplashScreenState extends State<SplashScreen> {
           return;
         }
       }
-      
+
       // Check if terms have been accepted
       final termsAccepted = prefs.getBool('terms_accepted') ?? false;
       if (!termsAccepted) {
@@ -298,7 +312,7 @@ class _SplashScreenState extends State<SplashScreen> {
           return;
         }
       }
-      
+
       // For the initial flow, always force users to login after splash screen
       // to ensure the correct authentication
       authCheckComplete = true;

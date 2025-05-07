@@ -13,7 +13,7 @@ class SplashScreen extends StatefulWidget {
 
 class _SplashScreenState extends State<SplashScreen> {
   final usersAuthService = user_auth.AuthService();
-  
+
   @override
   void initState() {
     super.initState();
@@ -30,15 +30,15 @@ class _SplashScreenState extends State<SplashScreen> {
         prefsCompleter.completeError(e);
       }
     );
-    
+
     // Shorter splash screen delay
     await Future.delayed(const Duration(seconds: 1));
 
     if (!mounted) return;
-    
+
     // Add a safety timeout to ensure the app doesn't hang
     bool authCheckComplete = false;
-    
+
     // Set up a safety timeout (reduced to 3 seconds)
     Future.delayed(const Duration(seconds: 3), () {
       if (!mounted || authCheckComplete) return;
@@ -55,7 +55,7 @@ class _SplashScreenState extends State<SplashScreen> {
           throw TimeoutException("SharedPreferences timeout");
         }
       );
-      
+
       // Check if this is the first time the app is running
       final firstRun = prefs.getBool('first_run') ?? true;
       if (firstRun) {
@@ -68,7 +68,7 @@ class _SplashScreenState extends State<SplashScreen> {
           return;
         }
       }
-      
+
       // Check if terms have been accepted
       final termsAccepted = prefs.getBool('terms_accepted') ?? false;
       if (!termsAccepted) {
@@ -79,7 +79,7 @@ class _SplashScreenState extends State<SplashScreen> {
           return;
         }
       }
-      
+
       // For the initial flow, always force users to login after splash screen
       // to ensure the correct authentication
       authCheckComplete = true;
@@ -98,7 +98,7 @@ class _SplashScreenState extends State<SplashScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Theme.of(context).primaryColor,
+      backgroundColor: Colors.white,
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -109,17 +109,17 @@ class _SplashScreenState extends State<SplashScreen> {
               height: 150,
             ),
             const SizedBox(height: 24),
-            const Text(
+            Text(
               'Immy App',
               style: TextStyle(
-                color: Colors.white,
+                color: Theme.of(context).primaryColor,
                 fontSize: 32,
                 fontWeight: FontWeight.bold,
               ),
             ),
             const SizedBox(height: 24),
-            const CircularProgressIndicator(
-              valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+            CircularProgressIndicator(
+              valueColor: AlwaysStoppedAnimation<Color>(Theme.of(context).primaryColor),
             ),
           ],
         ),

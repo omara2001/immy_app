@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import '../services/backend_api_service.dart';
 import '../services/stripe_service.dart';
+import '../services/payment_processor.dart';
 import '../widgets/subscription_banner.dart';
+import '../widgets/payment_card_input.dart';
 
 class SubscriptionScreen extends StatefulWidget {
   final int userId;
@@ -20,6 +22,8 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
   String? _errorMessage;
   List<Map<String, dynamic>> _subscriptions = [];
   List<Map<String, dynamic>> _serialNumbers = [];
+  List<Map<String, dynamic>> _paymentMethods = [];
+  bool _isAddingCard = false;
   
   @override
   void initState() {
@@ -72,6 +76,16 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
             'created_at': DateTime.now().toIso8601String(),
           }];
         });
+      }
+      
+      // Load payment methods
+      try {
+        final customerId = await StripeService.getOrCreateCustomerId(widget.userId);
+        _paymentMethods = await StripeService.getCustomerPaymentMethods(customerId: customerId);
+        print('Loaded ${_paymentMethods.length} payment methods');
+      } catch (e) {
+        print('Error loading payment methods: $e');
+        _paymentMethods = [];
       }
       
       // If we have no subscriptions but have serial numbers, create a test subscription
@@ -140,7 +154,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
       if (sub['status'] == 'active') {
         final endDate = sub['end_date'] is String 
             ? DateTime.parse(sub['end_date'])
-            : sub['end_date'];
+            : sub['end_date'] as DateTime;
             
         if (endDate.isBefore(DateTime.now())) {
           // Found an expired subscription still marked as active
@@ -196,57 +210,34 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
     try {
       print('Cancelling subscription $subscriptionId (Stripe ID: $stripeSubscriptionId)');
       
-      bool isTestOrMock = stripeSubscriptionId.isEmpty || 
-                         stripeSubscriptionId.startsWith('sub_test') || 
-                         stripeSubscriptionId.startsWith('sub_mock') ||
-                         stripeSubscriptionId.startsWith('sub_fallback') ||
-                         stripeSubscriptionId.startsWith('sub_renewal');
+      // Use PaymentProcessor to cancel the subscription
+      final success = await PaymentProcessor.cancelSubscription(widget.userId, stripeSubscriptionId);
       
-      // Try to cancel in Stripe if it's not a test subscription
-      if (!isTestOrMock) {
-        try {
-          await StripeService.cancelSubscription(
-            subscriptionId: stripeSubscriptionId
-          );
-          print('Stripe subscription cancelled successfully');
-        } catch (e) {
-          print('Error cancelling Stripe subscription: $e');
-          // Continue with cancellation even if Stripe fails
-        }
-      } else {
-        print('Using test/mock subscription, skipping Stripe cancellation');
-      }
-      
-      // Update subscription status in database
-      try {
-        await BackendApiService.executeQuery(
-          'UPDATE Subscriptions SET status = ? WHERE id = ?',
-          ['cancelled', subscriptionId]
+      if (success) {
+        print('Subscription cancelled successfully');
+        
+        // Update UI by updating the status of the cancelled subscription
+        setState(() {
+          _subscriptions = _subscriptions.map((sub) {
+            if (sub['id'] == subscriptionId) {
+              return {...sub, 'status': 'cancelled'};
+            }
+            return sub;
+          }).toList();
+        });
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Subscription cancelled successfully'),
+            backgroundColor: Colors.green,
+          ),
         );
-        print('Subscription marked as cancelled in database');
-      } catch (e) {
-        print('Error updating subscription status in database: $e');
+        
+        // Reload data to ensure we have the latest status
+        await _loadData();
+      } else {
+        throw Exception('Failed to cancel subscription');
       }
-      
-      // Update the UI by updating the status of the cancelled subscription
-      setState(() {
-        _subscriptions = _subscriptions.map((sub) {
-          if (sub['id'] == subscriptionId) {
-            return {...sub, 'status': 'cancelled'};
-          }
-          return sub;
-        }).toList();
-      });
-      
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Subscription cancelled successfully'),
-          backgroundColor: Colors.green,
-        ),
-      );
-      
-      // Reload data to ensure we have the latest status
-      await _loadData();
     } catch (e) {
       print('Error in _cancelSubscription: $e');
       setState(() {
@@ -267,9 +258,165 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
     }
   }
   
+  Future<void> _addPaymentMethodAndSubscribe() async {
+    setState(() {
+      _isAddingCard = true;
+    });
+  }
+  
+  Future<void> _processNewSubscription(String paymentMethodId) async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+    
+    try {
+      // Get customer information for the user
+      final users = await BackendApiService.executeQuery(
+        'SELECT * FROM Users WHERE id = ?',
+        [widget.userId]
+      );
+      
+      if (users.isEmpty) {
+        throw Exception('User not found');
+      }
+      
+      final user = users.first;
+      final email = user['email'];
+      if (email == null || email.toString().isEmpty) {
+        throw Exception('User has no email address');
+      }
+      final customerEmail = email.toString();
+      final name = user['name'];
+      
+      print('Processing subscription for user: $customerEmail');
+      
+      // Get a valid serial number
+      if (_serialNumbers.isEmpty) {
+        throw Exception('No serial numbers found');
+      }
+      final serialId = _serialNumbers.first['id'];
+      
+      // Show processing dialog
+      _showProcessingDialog();
+      
+      // If we have a payment method ID, update or attach it
+      if (paymentMethodId.isNotEmpty) {
+        // Get customer ID
+        final customerId = await StripeService.getOrCreateCustomerId(widget.userId);
+        print('Got customer ID: $customerId for email: $customerEmail');
+        
+        // Attach payment method to customer
+        await StripeService.attachPaymentMethodToCustomer(
+          paymentMethodId: paymentMethodId,
+          customerId: customerId,
+        );
+      }
+      
+      // Process the payment
+      final result = await PaymentProcessor.processPayment(
+        userId: widget.userId,
+        serialId: serialId,
+        amount: 7.99,
+        currency: 'gbp',
+        customerEmail: customerEmail,
+        customerName: name,
+      );
+      
+      // Close the processing dialog
+      Navigator.of(context).pop();
+      
+      if (result['success'] == true) {
+        // Success! Reload data
+        await _loadData();
+        
+        setState(() {
+          _isAddingCard = false;
+        });
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Subscription created successfully'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      } else {
+        // Payment failed
+        setState(() {
+          _errorMessage = 'Failed to create subscription: ${result['error']}';
+        });
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to create subscription: ${result['error']}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } catch (e) {
+      print('Error creating subscription: $e');
+      
+      // Make sure processing dialog is closed
+      if (Navigator.canPop(context)) {
+        Navigator.of(context).pop();
+      }
+      
+      setState(() {
+        _errorMessage = 'Failed to create subscription: $e';
+      });
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to create subscription: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+  
+  void _showProcessingDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const AlertDialog(
+        title: Text('Processing Payment'),
+        content: Row(
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(width: 16),
+            Text('Please wait...'),
+          ],
+        ),
+      ),
+    );
+  }
+  
   @override
   Widget build(BuildContext context) {
     final hasActiveSubscription = _subscriptions.any((sub) => sub['status'] == 'active');
+    
+    if (_isAddingCard) {
+      return Scaffold(
+        appBar: AppBar(
+          title: const Text('Add Payment Method'),
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back),
+            onPressed: () {
+              setState(() {
+                _isAddingCard = false;
+              });
+            },
+          ),
+        ),
+        body: PaymentCardInput(
+          onPaymentMethodCreated: _processNewSubscription,
+        ),
+      );
+    }
     
     return Scaffold(
       appBar: AppBar(
@@ -282,8 +429,35 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  SubscriptionBanner(isActive: hasActiveSubscription),
+                  SubscriptionBanner(
+                    isActive: hasActiveSubscription,
+                    onActivateTap: _addPaymentMethodAndSubscribe,
+                  ),
                   const SizedBox(height: 24),
+                  
+                  // Payment methods section
+                  if (_paymentMethods.isNotEmpty) ...[
+                    Text(
+                      'Your Payment Methods',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 18,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    ..._paymentMethods.map((method) => _buildPaymentMethodItem(method)),
+                    const SizedBox(height: 16),
+                    OutlinedButton.icon(
+                      onPressed: _addPaymentMethodAndSubscribe,
+                      icon: const Icon(Icons.add),
+                      label: const Text('Add Payment Method'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFF8B5CF6),
+                        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                  ],
                   
                   // Subscription status
                   Text(
@@ -368,25 +542,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
                           ),
                           const SizedBox(height: 16),
                           ElevatedButton(
-                            onPressed: () {
-                              // Navigate to payment screen if there's at least one serial number
-                              if (_serialNumbers.isNotEmpty) {
-                                // Update to use Payments tab in home page
-                                Navigator.pushNamedAndRemoveUntil(
-                                  context,
-                                  '/home',
-                                  (route) => false,
-                                  arguments: {'initialTab': 3} // Payments tab index
-                                );
-                              } else {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text('No serial numbers found. Please add a serial number first.'),
-                                    backgroundColor: Colors.red,
-                                  ),
-                                );
-                              }
-                            },
+                            onPressed: _addPaymentMethodAndSubscribe,
                             style: ElevatedButton.styleFrom(
                               backgroundColor: const Color(0xFF8B5CF6), // purple-600
                               foregroundColor: Colors.white,
@@ -421,14 +577,80 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
     );
   }
   
+  Widget _buildPaymentMethodItem(Map<String, dynamic> method) {
+    // Extract card details
+    final card = method['card'] ?? {};
+    final brand = card['brand'] ?? 'Unknown';
+    final last4 = card['last4'] ?? '****';
+    final expMonth = card['exp_month']?.toString() ?? '--';
+    final expYear = card['exp_year']?.toString() ?? '--';
+    
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFE5E7EB)), // gray-200
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: const Color(0xFFEDE9FE), // purple-100
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Icon(
+              Icons.credit_card,
+              color: Color(0xFF8B5CF6), // purple-600
+              size: 24,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  brand.toString().toUpperCase(),
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w500,
+                    fontSize: 14,
+                  ),
+                ),
+                Text(
+                  '**** **** **** $last4 • Expires $expMonth/$expYear',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: Color(0xFF6B7280), // gray-500
+                  ),
+                ),
+              ],
+            ),
+          ),
+          TextButton(
+            onPressed: _addPaymentMethodAndSubscribe,
+            style: TextButton.styleFrom(
+              foregroundColor: const Color(0xFF8B5CF6), // purple-600
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            ),
+            child: const Text('Update'),
+          ),
+        ],
+      ),
+    );
+  }
+  
   Widget _buildSubscriptionItem(Map<String, dynamic> subscription) {
     final startDate = subscription['start_date'] is String
         ? DateTime.parse(subscription['start_date'])
-        : subscription['start_date'];
+        : subscription['start_date'] as DateTime;
     
     final endDate = subscription['end_date'] is String
         ? DateTime.parse(subscription['end_date'])
-        : subscription['end_date'];
+        : subscription['end_date'] as DateTime;
     
     final isActive = subscription['status'] == 'active';
     final isExpired = endDate.isBefore(DateTime.now());
@@ -534,15 +756,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
                 Row(
                   children: [
                     OutlinedButton(
-                      onPressed: () {
-                        // Update to use Payments tab in home page
-                        Navigator.pushNamedAndRemoveUntil(
-                          context,
-                          '/home',
-                          (route) => false,
-                          arguments: {'initialTab': 3} // Payments tab index
-                        );
-                      },
+                      onPressed: _addPaymentMethodAndSubscribe,
                       style: OutlinedButton.styleFrom(
                         foregroundColor: const Color(0xFF8B5CF6), // purple-600
                         side: const BorderSide(color: Color(0xFF8B5CF6)), // purple-600
@@ -582,7 +796,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
     final hasActiveSubscription = _subscriptions.any((sub) => 
       sub['serial_id'] == serial['id'] && 
       sub['status'] == 'active' &&
-      DateTime.parse(sub['end_date'].toString()).isAfter(DateTime.now())
+      _parseDateTime(sub['end_date']).isAfter(DateTime.now())
     );
     
     return Container(
@@ -634,15 +848,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
           ),
           if (!hasActiveSubscription)
             TextButton(
-              onPressed: () {
-                // Update to use Payments tab in home page
-                Navigator.pushNamedAndRemoveUntil(
-                  context,
-                  '/home',
-                  (route) => false,
-                  arguments: {'initialTab': 3} // Payments tab index
-                );
-              },
+              onPressed: _addPaymentMethodAndSubscribe,
               style: TextButton.styleFrom(
                 foregroundColor: const Color(0xFF8B5CF6), // purple-600
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -654,7 +860,18 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
     );
   }
   
-  String _formatDate(DateTime date) {
+  // Helper method to safely parse DateTime
+  DateTime _parseDateTime(dynamic dateValue) {
+    if (dateValue is DateTime) {
+      return dateValue;
+    } else if (dateValue is String) {
+      return DateTime.parse(dateValue);
+    }
+    return DateTime.now(); // Fallback
+  }
+  
+  String _formatDate(DateTime? date) {
+    if (date == null) return 'N/A';
     return '${date.day}/${date.month}/${date.year}';
   }
 }

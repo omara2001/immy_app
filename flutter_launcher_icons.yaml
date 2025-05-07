@@ -1,0 +1,19 @@
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/immy_BrainyBear.png"
+  adaptive_icon_background: "#ffffff" # white background
+  adaptive_icon_foreground: "assets/immy_BrainyBear.png"
+  remove_alpha_ios: true
+  web:
+    generate: true
+    image_path: "assets/immy_BrainyBear.png"
+    background_color: "#ffffff"
+    theme_color: "#ffffff"
+  windows:
+    generate: true
+    image_path: "assets/immy_BrainyBear.png"
+    icon_size: 48 # min:48, max:256, default: 48
+  macos:
+    generate: true
+    image_path: "assets/immy_BrainyBear.png"

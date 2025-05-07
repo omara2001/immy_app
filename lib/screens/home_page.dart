@@ -16,7 +16,7 @@ class HomePage extends StatefulWidget {
   final user_auth.AuthService? usersAuthService;
 
   const HomePage({
-    super.key, 
+    super.key,
     required this.serialService,
     required this.apiService,
     this.authService,
@@ -37,7 +37,7 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
-    
+
     _pages = [
       const HomeContent(),
       InsightsPage(apiService: widget.apiService),
@@ -45,10 +45,10 @@ class _HomePageState extends State<HomePage> {
       const PaymentsPage(),
       const SettingsPage(),
     ];
-    
+
     _checkAdminStatus();
     _loadUserData();
-    
+
     // Handle initial tab if provided
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final args = ModalRoute.of(context)?.settings.arguments;
@@ -65,7 +65,7 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _loadUserData() async {
     setState(() => _isLoading = true);
-    
+
     try {
       // Try to get user from users auth service first
       if (widget.usersAuthService != null) {
@@ -79,7 +79,7 @@ class _HomePageState extends State<HomePage> {
           return;
         }
       }
-      
+
       // Fall back to admin auth service
       if (widget.authService != null) {
         final user = await widget.authService!.getCurrentUser();
@@ -111,7 +111,7 @@ class _HomePageState extends State<HomePage> {
         }
         return;
       }
-      
+
       // Fall back to admin auth service
       if (widget.authService != null) {
         final isAdmin = await widget.authService!.isCurrentUserAdmin();
@@ -129,7 +129,7 @@ class _HomePageState extends State<HomePage> {
       // Logout from both services
       await widget.usersAuthService?.logout();
       await widget.authService?.logout();
-      
+
       if (mounted) {
         Navigator.of(context).pushReplacementNamed('/login');
       }
@@ -186,13 +186,13 @@ class _HomePageState extends State<HomePage> {
           IconButton(
             icon: const Icon(Icons.qr_code_scanner, color: Colors.white),
             onPressed: () => Navigator.pushNamed(context, '/scan-qr-code'),
-          ),  
+          ),
           IconButton(
             icon: const Icon(Icons.notifications_outlined, color: Colors.white),
             onPressed: () {},
           ),
           PopupMenuButton<String>(
-            icon: const Icon(Icons.menu, color: Colors.white),
+            icon: const Icon(Icons.account_circle, color: Colors.white),
             onSelected: (value) {
               if (value == 'logout') _logout();
               if (value == 'settings') setState(() => _selectedIndex = 4);
@@ -355,7 +355,7 @@ class HomeContent extends StatelessWidget {
     // Get access to the parent state to check admin status
     final homePageState = context.findAncestorStateOfType<_HomePageState>();
     final isAdmin = homePageState?._isAdmin ?? false;
-    
+
     return SingleChildScrollView(
       child: Padding(
         padding: const EdgeInsets.all(16.0),
@@ -458,6 +458,7 @@ class HomeContent extends StatelessWidget {
                   'Adjust learning preferences',
                   const Color(0xFFDCFCE7),
                   const Color(0xFF16A34A),
+                  onTap: () => Navigator.pushNamed(context, '/learning-journey'),
                 ),
                 _buildQuickActionCard(
                   context,
@@ -466,6 +467,7 @@ class HomeContent extends StatelessWidget {
                   'Browse magical stories',
                   const Color(0xFFFEF3C7),
                   const Color(0xFFD97706),
+                  onTap: () => Navigator.pushNamed(context, '/story-time'),
                 ),
                 _buildQuickActionCard(
                   context,

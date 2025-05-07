@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../services/users_auth_service.dart';
+import '../services/theme_provider.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -15,7 +17,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
   final _authService = AuthService();
-  
+
   bool _isLoading = false;
   String? _errorMessage;
   bool _obscurePassword = true;
@@ -34,19 +36,19 @@ class _RegisterScreenState extends State<RegisterScreen> {
     if (!_formKey.currentState!.validate()) {
       return;
     }
-    
+
     setState(() {
       _isLoading = true;
       _errorMessage = null;
     });
-    
+
     try {
       await _authService.register(
         _nameController.text.trim(),
         _emailController.text.trim(),
         _passwordController.text,
       );
-      
+
       if (mounted) {
         // Show success message
         ScaffoldMessenger.of(context).showSnackBar(
@@ -56,12 +58,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
             duration: Duration(seconds: 3),
           ),
         );
-        
+
         // Wait for snackbar to be visible before navigating
         await Future.delayed(const Duration(seconds: 1));
-        
+
         // Navigate to login page and remove all previous routes
-        Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
+        if (mounted) {
+          Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
+        }
       }
     } catch (e) {
       setState(() {
@@ -78,8 +82,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final themeProvider = Provider.of<ThemeProvider>(context);
+
     return Scaffold(
-      backgroundColor: Colors.white,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
@@ -98,26 +103,28 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   height: 100,
                 ),
                 const SizedBox(height: 24),
-                
+
                 // Title
-                const Text(
+                Text(
                   'Create Account',
                   style: TextStyle(
                     fontSize: 24,
                     fontWeight: FontWeight.bold,
-                    color: Color(0xFF8B5CF6), // purple-600
+                    color: const Color(0xFF8B5CF6), // purple-600
                   ),
                 ),
                 const SizedBox(height: 8),
-                const Text(
+                Text(
                   'Sign up to get started with Immy App',
                   style: TextStyle(
                     fontSize: 16,
-                    color: Color(0xFF6B7280), // gray-500
+                    color: Theme.of(context).brightness == Brightness.dark
+                        ? Colors.white70
+                        : const Color(0xFF6B7280), // gray-500
                   ),
                 ),
                 const SizedBox(height: 32),
-                
+
                 // Error message
                 if (_errorMessage != null)
                   Container(
@@ -146,7 +153,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     ),
                   ),
                 if (_errorMessage != null) const SizedBox(height: 16),
-                
+
                 // Registration form
                 Form(
                   key: _formKey,
@@ -168,7 +175,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         },
                       ),
                       const SizedBox(height: 16),
-                      
+
                       // Email field
                       TextFormField(
                         controller: _emailController,
@@ -189,7 +196,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         },
                       ),
                       const SizedBox(height: 16),
-                      
+
                       // Password field
                       TextFormField(
                         controller: _passwordController,
@@ -220,7 +227,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         },
                       ),
                       const SizedBox(height: 16),
-                      
+
                       // Confirm Password field
                       TextFormField(
                         controller: _confirmPasswordController,
@@ -251,7 +258,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         },
                       ),
                       const SizedBox(height: 24),
-                      
+
                       // Register button
                       SizedBox(
                         width: double.infinity,
@@ -284,15 +291,17 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         ),
                       ),
                       const SizedBox(height: 24),
-                      
+
                       // Login link
                       Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          const Text(
+                          Text(
                             'Already have an account?',
                             style: TextStyle(
-                              color: Color(0xFF6B7280), // gray-500
+                              color: Theme.of(context).brightness == Brightness.dark
+                                  ? Colors.white70
+                                  : const Color(0xFF6B7280), // gray-500
                             ),
                           ),
                           TextButton(

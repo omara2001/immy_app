@@ -1,29 +1,28 @@
 class ConversationMessage {
-  final String id;
   final String sender;
   final String content;
   final DateTime timestamp;
 
   ConversationMessage({
-    required this.id,
     required this.sender,
     required this.content,
     required this.timestamp,
   });
 
-  // Factory to create ConversationMessage from JSON
   factory ConversationMessage.fromJson(Map<String, dynamic> json) {
     return ConversationMessage(
-      id: json['id'],
-      sender: json['sender'],
-      content: json['content'],
-      timestamp: DateTime.parse(json['timestamp']),
+      sender: json['sender'] ?? 'Unknown',
+      content: json['content'] ?? '',
+      timestamp: json['timestamp'] != null 
+          ? DateTime.parse(json['timestamp']) 
+          : DateTime.now(),
     );
   }
 
-  // Helper to format timestamp nicely
   String get formattedTime {
-    return '${timestamp.hour.toString().padLeft(2, '0')}:${timestamp.minute.toString().padLeft(2, '0')}';
+    final hour = timestamp.hour.toString().padLeft(2, '0');
+    final minute = timestamp.minute.toString().padLeft(2, '0');
+    return '$hour:$minute';
   }
 }
 
@@ -34,6 +33,7 @@ class ConversationDetail {
   final DateTime endTime;
   final List<ConversationMessage> messages;
   Map<String, dynamic>? insights; // NOT final anymore, so it can be updated
+  final String summary; // Added summary field
 
   ConversationDetail({
     required this.id,
@@ -42,6 +42,7 @@ class ConversationDetail {
     required this.endTime,
     required this.messages,
     this.insights,
+    this.summary = '', // Default empty string
   });
 
   // Factory to create ConversationDetail from JSON
@@ -49,12 +50,13 @@ class ConversationDetail {
     return ConversationDetail(
       id: json['id'],
       title: json['title'],
-      startTime: DateTime.parse(json['start_time']),
-      endTime: DateTime.parse(json['end_time']),
-      messages: (json['messages'] as List)
+      startTime: DateTime.parse(json['start_time'] ?? DateTime.now().toIso8601String()),
+      endTime: DateTime.parse(json['end_time'] ?? DateTime.now().toIso8601String()),
+      messages: (json['messages'] as List? ?? [])
           .map((msg) => ConversationMessage.fromJson(msg))
           .toList(),
       insights: json['insights'],
+      summary: json['summary'] ?? '',
     );
   }
 

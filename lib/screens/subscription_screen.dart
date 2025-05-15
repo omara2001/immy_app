@@ -4,6 +4,7 @@ import '../services/stripe_service.dart';
 import '../services/payment_processor.dart';
 import '../widgets/subscription_banner.dart';
 import '../widgets/payment_card_input.dart';
+import '../services/notification_service.dart';
 
 class SubscriptionScreen extends StatefulWidget {
   final int userId;
@@ -44,7 +45,8 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
       
       // Load subscriptions
       try {
-        _subscriptions = await BackendApiService.getUserSubscriptions(widget.userId);
+        final result = await BackendApiService.getUserSubscriptions(widget.userId);
+        _subscriptions = List<Map<String, dynamic>>.from(result);
         print('Loaded ${_subscriptions.length} subscriptions');
       } catch (e) {
         print('Error loading subscriptions: $e');
@@ -179,6 +181,17 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
         endDate,
         stripeSubscriptionId: 'sub_renewal_${DateTime.now().millisecondsSinceEpoch}',
         stripePriceId: 'price_standard'
+      );
+      
+      // After successful renewal, cancel any expiry notifications
+      await NotificationService().cancelSubscriptionExpiryNotifications();
+      
+      // Show a success notification
+      await NotificationService().showImmediateNotification(
+        id: 300,
+        title: 'Subscription Renewed',
+        body: 'Your subscription has been successfully renewed. Thank you!',
+        payload: 'subscription_renewed',
       );
       
       // Update the UI

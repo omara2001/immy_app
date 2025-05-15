@@ -82,7 +82,7 @@ class _PaymentsPageState extends State<PaymentsPage> {
       try {
         final userSubscriptions = await BackendApiService.getUserSubscriptions(_userId);
         setState(() {
-          _subscriptions = userSubscriptions;
+          _subscriptions = List<Map<String, dynamic>>.from(userSubscriptions);
         });
         print('Loaded ${userSubscriptions.length} subscriptions');
       } catch (e) {
@@ -96,7 +96,7 @@ class _PaymentsPageState extends State<PaymentsPage> {
       try {
         final userPayments = await BackendApiService.getUserPayments(_userId);
         setState(() {
-          _payments = userPayments;
+          _payments = List<Map<String, dynamic>>.from(userPayments);
         });
         print('Loaded ${userPayments.length} payments');
       } catch (e) {
@@ -731,150 +731,87 @@ class _PaymentsPageState extends State<PaymentsPage> {
   
   @override
   Widget build(BuildContext context) {
-    // Check if user has active subscription
-    final hasActiveSubscription = _subscriptions.any((sub) {
-      if (sub['end_date'] == null) return false;
-      final endDate = _parseDateTime(sub['end_date']);
-      return sub['status'] == 'active' && endDate.isAfter(DateTime.now());
-    });
+    final colorScheme = Theme.of(context).colorScheme;
     
     return Scaffold(
       appBar: AppBar(
         title: const Text('Payments'),
+        backgroundColor: colorScheme.surfaceVariant,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _manualSyncWithStripe,
+            tooltip: 'Sync with Stripe',
+          ),
+        ],
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : RefreshIndicator(
-              onRefresh: _loadData,
-              child: Stack(
-                children: [
-                  SingleChildScrollView(
-                    physics: const AlwaysScrollableScrollPhysics(),
+      body: Stack(
+        children: [
+          // Main content
+          _isLoading
+              ? const Center(child: CircularProgressIndicator())
+              : RefreshIndicator(
+                  onRefresh: _loadData,
+                  child: SingleChildScrollView(
                     padding: const EdgeInsets.all(16.0),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // Subscription banner
-                        SubscriptionBanner(
-                          isActive: _subscriptions.any((sub) => sub['status'] == 'active'),
-                          onActivateTap: _subscribeNow,
-                        ),
-                        
-                        const SizedBox(height: 24),
-                        
-                        // Current Plan
-                        const Text(
+                        // Current Plan Section with enhanced styling
+                        Text(
                           'Current Plan',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 18,
-                          ),
+                          style: Theme.of(context).textTheme.titleLarge,
                         ),
                         const SizedBox(height: 16),
                         _buildCurrentPlan(),
                         
                         const SizedBox(height: 32),
                         
-                        // Payment Method
-                        const Text(
+                        // Payment Method with enhanced styling
+                        Text(
                           'Payment Method',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 18,
-                          ),
+                          style: Theme.of(context).textTheme.titleLarge,
                         ),
                         const SizedBox(height: 16),
                         _buildPaymentMethod(),
                         
                         const SizedBox(height: 32),
                         
-                        // Payment History
-                        const Text(
+                        // Payment History with enhanced styling
+                        Text(
                           'Payment History',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 18,
-                          ),
+                          style: Theme.of(context).textTheme.titleLarge,
                         ),
                         const SizedBox(height: 16),
                         _buildPaymentHistory(),
                         
-                        // Add support link section at the bottom
+                        // Support section with enhanced styling
                         const SizedBox(height: 32),
                         _buildSupportSection(),
                         
-                        // Add padding at the bottom for the error banner
                         SizedBox(height: _errorMessage != null ? 70 : 0),
                       ],
                     ),
                   ),
-                  
-                  // Error Banner at the bottom
-                  if (_errorMessage != null && !_errorMessage!.contains('Demo mode'))
-                    Positioned(
-                      bottom: 0,
-                      left: 0,
-                      right: 0,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                        color: Colors.red,
-                        child: Row(
-                          children: [
-                            const Icon(Icons.error_outline, color: Colors.white),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                _errorMessage!,
-                                style: const TextStyle(color: Colors.white),
-                              ),
-                            ),
-                            IconButton(
-                              icon: const Icon(Icons.close, color: Colors.white),
-                              onPressed: () {
-                                setState(() {
-                                  _errorMessage = null;
-                                });
-                              },
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    
-                  // Demo mode indicator (less prominent than an error)
-                  if (_errorMessage != null && _errorMessage!.contains('Demo mode'))
-                    Positioned(
-                      bottom: 0,
-                      left: 0,
-                      right: 0,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                        color: Colors.amber.shade700,
-                        child: Row(
-                          children: [
-                            const Icon(Icons.info_outline, color: Colors.white),
-                            const SizedBox(width: 8),
-                            const Expanded(
-                              child: Text(
-                                'Demo mode active - subscription data is simulated',
-                                style: TextStyle(color: Colors.white),
-                              ),
-                            ),
-                            IconButton(
-                              icon: const Icon(Icons.close, color: Colors.white),
-                              onPressed: () {
-                                setState(() {
-                                  _errorMessage = null;
-                                });
-                              },
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                ],
+                ),
+          
+          // Error banner at the bottom
+          if (_errorMessage != null)
+            Positioned(
+              bottom: 0,
+              left: 0,
+              right: 0,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                color: colorScheme.errorContainer,
+                child: Text(
+                  _errorMessage!,
+                  style: TextStyle(color: colorScheme.onErrorContainer),
+                ),
               ),
             ),
+        ],
+      ),
     );
   }
 

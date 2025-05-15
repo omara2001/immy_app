@@ -51,8 +51,16 @@ class _RecentConversationsScreenState extends State<RecentConversationsScreen> {
 
   Future<void> _openConversation(String fileName) async {
     try {
-      final summary = await widget.apiService.getSummary();
-      final content = summary['summary'];
+      setState(() {
+        _isLoading = true;
+      });
+      
+      // Get the summary for this specific conversation
+      final summary = await widget.apiService.getConversationSummary(fileName);
+      
+      setState(() {
+        _isLoading = false;
+      });
 
       if (!mounted) return;
 
@@ -64,10 +72,15 @@ class _RecentConversationsScreenState extends State<RecentConversationsScreen> {
             conversationId: fileName,
             authService: null,
             usersAuthService: null,
+            initialSummary: summary['summary'],
           ),
         ),
       );
     } catch (e) {
+      setState(() {
+        _isLoading = false;
+      });
+      
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error loading conversation: $e')),
       );

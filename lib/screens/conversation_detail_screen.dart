@@ -9,6 +9,7 @@ class ConversationDetailScreen extends StatefulWidget {
   final String conversationId;
   final auth_service.AuthService? authService;
   final users_auth_service.AuthService? usersAuthService;
+  final String? initialSummary;
 
   const ConversationDetailScreen({
     super.key,
@@ -16,6 +17,7 @@ class ConversationDetailScreen extends StatefulWidget {
     required this.conversationId,
     this.authService,
     this.usersAuthService,
+    this.initialSummary,
   });
 
   @override
@@ -26,13 +28,34 @@ class _ConversationDetailScreenState extends State<ConversationDetailScreen> {
   bool _isLoading = true;
   String? _errorMessage;
   ConversationDetail? _conversation;
-  bool _isAdmin = false;
+  bool _isAdmin = false; // Add this variable
 
   @override
   void initState() {
     super.initState();
-    _checkAdminStatus();
-    _loadConversationDetails();
+    
+    _checkAdminStatus(); // Call this method to check admin status
+    
+    if (widget.initialSummary != null) {
+      // If we already have a summary, create a basic conversation object
+      setState(() {
+        _conversation = ConversationDetail(
+          id: widget.conversationId,
+          title: widget.conversationId,
+          startTime: DateTime.now(),
+          endTime: DateTime.now(),
+          messages: [],
+          insights: {
+            'topics': ['conversation', 'learning'],
+            'sentiment': 'positive',
+          },
+          summary: widget.initialSummary!,
+        );
+        _isLoading = false;
+      });
+    } else {
+      _loadConversationDetails();
+    }
   }
 
   Future<void> _checkAdminStatus() async {
@@ -78,6 +101,138 @@ class _ConversationDetailScreenState extends State<ConversationDetailScreen> {
     }
   }
 
+  Widget _buildKeyMoments() {
+    final keyMoments = _conversation?.insights?['key_moments'] as List<dynamic>? ?? [];
+    if (keyMoments.isEmpty) return const SizedBox.shrink();
+    
+    return Container(
+      padding: const EdgeInsets.all(20),
+      margin: const EdgeInsets.only(top: 16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 5,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Key Moments',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF4B5563),
+            ),
+          ),
+          const SizedBox(height: 12),
+          ...keyMoments.map((moment) => Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(
+                  Icons.star,
+                  size: 16,
+                  color: Color(0xFF8B5CF6),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    moment.toString(),
+                    style: const TextStyle(
+                      fontSize: 14,
+                      color: Color(0xFF374151),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          )).toList(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildConversationStats() {
+    final duration = _conversation?.insights?['duration'] as String? ?? '';
+    final wordCount = _conversation?.insights?['word_count'] as int? ?? 0;
+    final childEngagement = _conversation?.insights?['child_engagement'] as String? ?? '';
+    
+    if (duration.isEmpty && wordCount == 0 && childEngagement.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    
+    return Container(
+      padding: const EdgeInsets.all(20),
+      margin: const EdgeInsets.only(top: 16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 5,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Conversation Statistics',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF4B5563),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              _buildStatItem(Icons.timer, 'Duration', duration),
+              const SizedBox(width: 24),
+              _buildStatItem(Icons.text_fields, 'Words', wordCount.toString()),
+              const SizedBox(width: 24),
+              _buildStatItem(Icons.psychology, 'Engagement', childEngagement),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatItem(IconData icon, String label, String value) {
+    return Expanded(
+      child: Column(
+        children: [
+          Icon(icon, color: const Color(0xFF8B5CF6), size: 24),
+          const SizedBox(height: 8),
+          Text(
+            value,
+            style: const TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF1F2937),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 12,
+              color: Color(0xFF6B7280),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -85,6 +240,7 @@ class _ConversationDetailScreenState extends State<ConversationDetailScreen> {
         title: Text(_conversation?.title ?? 'Conversation'),
         backgroundColor: const Color(0xFF8B5CF6),
         foregroundColor: Colors.white,
+        elevation: 0,
         actions: [
           if (_isAdmin)
             _buildAdminMenu(),
@@ -94,7 +250,37 @@ class _ConversationDetailScreenState extends State<ConversationDetailScreen> {
           ? const Center(child: CircularProgressIndicator())
           : _errorMessage != null
               ? _buildErrorView()
-              : _buildConversationDetail(),
+              : SingleChildScrollView(
+                  child: Column(
+                    children: [
+                      _buildConversationHeader(),
+                      _buildKeyMoments(),
+                      _buildConversationStats(),
+                      const SizedBox(height: 16),
+                      Padding(
+                        padding: const EdgeInsets.all(20),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Conversation',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFF1F2937),
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+                            ..._conversation!.messages.map((message) {
+                              final isImmy = message.sender.toLowerCase() == 'immy';
+                              return _buildMessageBubble(message, isImmy);
+                            }).toList(),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
     );
   }
 
@@ -235,45 +421,151 @@ class _ConversationDetailScreenState extends State<ConversationDetailScreen> {
 
   Widget _buildConversationHeader() {
     return Container(
-      padding: const EdgeInsets.all(16),
-      color: const Color(0xFFF9FAFB),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const CircleAvatar(
-                backgroundColor: Color(0xFFE0E7FF),
-                child: Icon(Icons.chat_bubble_outline, color: Color(0xFF4F46E5)),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      _conversation!.title,
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-                    ),
-                    Text(
-                      _conversation!.formattedDate,
-                      style: const TextStyle(color: Color(0xFF6B7280), fontSize: 14),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              _buildInfoChip(Icons.access_time, _conversation!.duration, const Color(0xFFDCFCE7), const Color(0xFF16A34A)),
-              const SizedBox(width: 8),
-              _buildInfoChip(Icons.chat, '${_conversation!.messages.length} messages', const Color(0xFFEDE9FE), const Color(0xFF8B5CF6)),
-            ],
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 5,
+            offset: const Offset(0, 2),
           ),
         ],
       ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            _conversation!.title,
+            style: const TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF1F2937),
+            ),
+          ),
+          const SizedBox(height: 16),
+          const Text(
+            'Summary',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF4B5563),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            _conversation!.summary.isNotEmpty 
+                ? _conversation!.summary 
+                : 'No summary available',
+            style: const TextStyle(
+              fontSize: 15,
+              height: 1.5,
+              color: Color(0xFF374151),
+            ),
+          ),
+          const SizedBox(height: 20),
+          _buildInsightsTags(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInsightsTags() {
+    final topics = _conversation?.insights?['topics'] as List<dynamic>? ?? [];
+    final sentiment = _conversation?.insights?['sentiment'] as String? ?? '';
+    
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Conversation Insights',
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.bold,
+            color: Color(0xFF4B5563),
+          ),
+        ),
+        const SizedBox(height: 12),
+        const Text(
+          'Topics Discussed',
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w500,
+            color: Color(0xFF6B7280),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: topics.map<Widget>((topic) {
+            return Chip(
+              label: Text(
+                topic.toString(),
+                style: const TextStyle(fontSize: 12),
+              ),
+              backgroundColor: const Color(0xFFF3F4F6),
+              padding: const EdgeInsets.all(4),
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            );
+          }).toList(),
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            const Text(
+              'Overall Sentiment: ',
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+                color: Color(0xFF6B7280),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: sentiment.toLowerCase() == 'positive' 
+                    ? const Color(0xFFDCFCE7) 
+                    : sentiment.toLowerCase() == 'negative'
+                        ? const Color(0xFFFEE2E2)
+                        : const Color(0xFFF3F4F6),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    sentiment.toLowerCase() == 'positive' 
+                        ? Icons.sentiment_satisfied_alt
+                        : sentiment.toLowerCase() == 'negative'
+                            ? Icons.sentiment_dissatisfied
+                            : Icons.sentiment_neutral,
+                    size: 16,
+                    color: sentiment.toLowerCase() == 'positive' 
+                        ? const Color(0xFF059669) 
+                        : sentiment.toLowerCase() == 'negative'
+                            ? const Color(0xFFDC2626)
+                            : const Color(0xFF6B7280),
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    sentiment,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      color: sentiment.toLowerCase() == 'positive' 
+                          ? const Color(0xFF059669) 
+                          : sentiment.toLowerCase() == 'negative'
+                              ? const Color(0xFFDC2626)
+                              : const Color(0xFF6B7280),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ],
     );
   }
 
@@ -342,7 +634,14 @@ class _ConversationDetailScreenState extends State<ConversationDetailScreen> {
           ),
           if (!isImmy) ...[
             const SizedBox(width: 8),
-            const CircleAvatar(backgroundColor: Color(0xFFF3E8FF), radius: 16, child: Text('E', style: TextStyle(color: Color(0xFF7E22CE), fontWeight: FontWeight.bold, fontSize: 12))),
+            CircleAvatar(
+              backgroundColor: const Color(0xFFEDE9FE),
+              radius: 16,
+              child: Text(
+                message.sender.substring(0, 1).toUpperCase(),
+                style: const TextStyle(color: Color(0xFF5B21B6), fontWeight: FontWeight.bold, fontSize: 12),
+              ),
+            ),
           ],
         ],
       ),

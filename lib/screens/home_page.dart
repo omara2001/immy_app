@@ -4,6 +4,8 @@ import '../services/serial_service.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart' as admin_auth;
 import '../services/users_auth_service.dart' as user_auth;
+import '../services/subscription_monitor_service.dart';
+import '../services/notification_service.dart';
 import 'insights_page.dart';
 import 'coach_page.dart';
 import 'payments_page.dart';
@@ -33,6 +35,8 @@ class _HomePageState extends State<HomePage> {
   bool _isAdmin = false;
   bool _isLoading = true;
   String _userName = '';
+  final SubscriptionMonitorService _subscriptionMonitor = SubscriptionMonitorService();
+  int _userId = 0; // Change from String to int
 
   @override
   void initState() {
@@ -63,6 +67,13 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
+  @override
+  void dispose() {
+    // Stop subscription monitoring when the page is disposed
+    _subscriptionMonitor.stopMonitoring();
+    super.dispose();
+  }
+
   Future<void> _loadUserData() async {
     setState(() => _isLoading = true);
 
@@ -74,8 +85,16 @@ class _HomePageState extends State<HomePage> {
           setState(() {
             _userName = user.name;
             _isAdmin = user.isAdmin;
+            _userId = user.id; // This is now an int
             _isLoading = false;
           });
+          
+          // Start subscription monitoring - convert to string when needed
+          _subscriptionMonitor.startMonitoring(_userId.toString());
+          
+          // Schedule daily update notification - convert to string when needed
+          _subscriptionMonitor.scheduleDailyUpdateNotification(_userId.toString());
+          
           return;
         }
       }
@@ -86,8 +105,20 @@ class _HomePageState extends State<HomePage> {
         if (mounted && user != null) {
           setState(() {
             _userName = user.name;
+            try {
+              _userId = int.parse(user.id); // Safely convert string ID to int
+            } catch (e) {
+              print('Error converting user ID: $e');
+              _userId = 0; // Fallback value
+            }
             _isLoading = false;
           });
+          
+          // Start subscription monitoring - convert to string when needed
+          _subscriptionMonitor.startMonitoring(_userId.toString());
+          
+          // Schedule daily update notification - convert to string when needed
+          _subscriptionMonitor.scheduleDailyUpdateNotification(_userId.toString());
         }
       }
     } catch (e) {
@@ -144,8 +175,11 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    
     return Scaffold(
       appBar: AppBar(
+        elevation: 0,
         backgroundColor: const Color(0xFF8B5CF6),
         title: const Row(
           children: [
@@ -235,19 +269,38 @@ class _HomePageState extends State<HomePage> {
       ),
       drawer: _buildDrawer(context),
       body: _pages[_selectedIndex],
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _selectedIndex,
-        onTap: (index) => setState(() => _selectedIndex = index),
-        type: BottomNavigationBarType.fixed,
-        selectedItemColor: const Color(0xFF8B5CF6),
-        unselectedItemColor: const Color(0xFF6B7280),
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
-          BottomNavigationBarItem(icon: Icon(Icons.chat_bubble_outline), label: 'Insights'),
-          BottomNavigationBarItem(icon: Icon(Icons.school), label: 'Coach'),
-          BottomNavigationBarItem(icon: Icon(Icons.payment), label: 'Payments'),
-          BottomNavigationBarItem(icon: Icon(Icons.settings), label: 'Settings'),
-        ],
+      bottomNavigationBar: Container(
+        decoration: BoxDecoration(
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.1),
+              blurRadius: 10,
+              offset: const Offset(0, -2),
+            ),
+          ],
+        ),
+        child: ClipRRect(
+          borderRadius: const BorderRadius.only(
+            topLeft: Radius.circular(20),
+            topRight: Radius.circular(20),
+          ),
+          child: BottomNavigationBar(
+            currentIndex: _selectedIndex,
+            onTap: (index) => setState(() => _selectedIndex = index),
+            type: BottomNavigationBarType.fixed,
+            selectedItemColor: const Color(0xFF8B5CF6),
+            unselectedItemColor: const Color(0xFF6B7280),
+            elevation: 0,
+            backgroundColor: Colors.white,
+            items: const [
+              BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
+              BottomNavigationBarItem(icon: Icon(Icons.chat_bubble_outline), label: 'Insights'),
+              BottomNavigationBarItem(icon: Icon(Icons.school), label: 'Coach'),
+              BottomNavigationBarItem(icon: Icon(Icons.payment), label: 'Payments'),
+              BottomNavigationBarItem(icon: Icon(Icons.settings), label: 'Settings'),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -350,6 +403,70 @@ class _HomePageState extends State<HomePage> {
 class HomeContent extends StatelessWidget {
   const HomeContent({super.key});
 
+  Widget _buildQuickActionCard(
+    BuildContext context,
+    IconData icon,
+    String title,
+    String subtitle,
+    Color backgroundColor,
+    Color iconColor, {
+    required VoidCallback onTap,
+  }) {
+    return Card(
+      elevation: 4,
+      shadowColor: backgroundColor.withOpacity(0.3),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                backgroundColor,
+                backgroundColor.withOpacity(0.7),
+              ],
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Icon(
+                icon,
+                size: 32,
+                color: iconColor,
+              ),
+              const SizedBox(height: 12),
+              Text(
+                title,
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                  color: iconColor,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                subtitle,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: iconColor.withOpacity(0.8),
+                ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     // Get access to the parent state to check admin status
@@ -357,14 +474,56 @@ class HomeContent extends StatelessWidget {
     final isAdmin = homePageState?._isAdmin ?? false;
 
     return SingleChildScrollView(
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const SubscriptionBanner(isActive: true),
-            const SizedBox(height: 24),
-            Card(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Hero banner with gradient background
+          Container(
+            width: double.infinity,
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [Color(0xFF8B5CF6), Color(0xFF7C3AED)],
+              ),
+            ),
+            child: SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.all(20.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Welcome back!',
+                      style: TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'What would you like to do today?',
+                      style: TextStyle(
+                        fontSize: 16,
+                        color: Colors.white,
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    const SubscriptionBanner(isActive: true),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          
+          // User profile card
+          Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Card(
+              elevation: 4,
+              shadowColor: Colors.black.withOpacity(0.1),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
               child: Padding(
                 padding: const EdgeInsets.all(16.0),
                 child: Column(
@@ -372,17 +531,18 @@ class HomeContent extends StatelessWidget {
                     const Row(
                       children: [
                         CircleAvatar(
-                          radius: 20,
+                          radius: 24,
                           backgroundColor: Color(0xFFDDEEFD),
                           child: Text(
                             'IB',
                             style: TextStyle(
                               color: Color(0xFF1E40AF),
                               fontWeight: FontWeight.bold,
+                              fontSize: 18,
                             ),
                           ),
                         ),
-                        SizedBox(width: 12),
+                        SizedBox(width: 16),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -395,9 +555,8 @@ class HomeContent extends StatelessWidget {
                                 ),
                               ),
                               Text(
-                                'Last active: 25 minutes ago',
+                                'Connected since Jan 2023',
                                 style: TextStyle(
-                                  fontSize: 12,
                                   color: Color(0xFF6B7280),
                                 ),
                               ),
@@ -407,119 +566,139 @@ class HomeContent extends StatelessWidget {
                       ],
                     ),
                     const SizedBox(height: 16),
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFEFF6FF),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: const Text(
-                        '"Today, Emma learned about dinosaurs and practiced counting to 20."',
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: Color(0xFF1E40AF),
+                    const LinearProgressIndicator(
+                      value: 0.7,
+                      backgroundColor: Color(0xFFE5E7EB),
+                      valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF8B5CF6)),
+                      borderRadius: BorderRadius.all(Radius.circular(10)),
+                    ),
+                    const SizedBox(height: 8),
+                    const Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'Learning progress',
+                          style: TextStyle(
+                            color: Color(0xFF6B7280),
+                            fontSize: 12,
+                          ),
                         ),
-                      ),
+                        Text(
+                          '70%',
+                          style: TextStyle(
+                            color: Color(0xFF8B5CF6),
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
               ),
             ),
-            const SizedBox(height: 24),
-            const Text(
-              'Quick Actions',
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 18,
-              ),
-            ),
-            const SizedBox(height: 16),
-            GridView.count(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              crossAxisCount: 2,
-              crossAxisSpacing: 12,
-              mainAxisSpacing: 12,
-              childAspectRatio: 1.2,
+          ),
+          
+          // Quick actions section
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _buildQuickActionCard(
-                  context,
-                  Icons.history,
-                  'Recent Conversations',
-                  'View what Emma has been learning',
-                  const Color(0xFFE0E7FF),
-                  const Color(0xFF4F46E5),
-                  onTap: () => Navigator.pushNamed(context, '/recent-conversations'),
-                ),
-                _buildQuickActionCard(
-                  context,
-                  Icons.trending_up,
-                  'Learning Journey',
-                  'Adjust learning preferences',
-                  const Color(0xFFDCFCE7),
-                  const Color(0xFF16A34A),
-                  onTap: () => Navigator.pushNamed(context, '/learning-journey'),
-                ),
-                _buildQuickActionCard(
-                  context,
-                  Icons.book,
-                  'Story Time',
-                  'Browse magical stories',
-                  const Color(0xFFFEF3C7),
-                  const Color(0xFFD97706),
-                  onTap: () => Navigator.pushNamed(context, '/story-time'),
-                ),
-                _buildQuickActionCard(
-                  context,
-                  Icons.group_add,
-                  'Add Another Immy',
-                  'Link a new Immy bear',
-                  const Color(0xFFEDE9FE), // purple-100
-                  const Color(0xFF8B5CF6), // purple-600
-                  onTap: () => Navigator.pushNamed(context, '/device-management'),
-                ),
-                // Only show device management for admins
-                if (isAdmin)
-                  _buildQuickActionCard(
-                    context,
-                    Icons.qr_code,
-                    'Manage Devices',
-                    'Link a new Immy bear',
-                    const Color(0xFFEDE9FE),
-                    const Color(0xFF8B5CF6),
-                    onTap: () => Navigator.pushNamed(context, '/serial-management'),
+                const Text(
+                  'Quick Actions',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
                   ),
+                ),
+                const SizedBox(height: 16),
+                GridView.count(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  crossAxisCount: 2,
+                  crossAxisSpacing: 12,
+                  mainAxisSpacing: 12,
+                  childAspectRatio: 1.2,
+                  children: [
+                    _buildQuickActionCard(
+                      context,
+                      Icons.history,
+                      'Recent Conversations',
+                      'View what Emma has been learning',
+                      const Color(0xFFE0E7FF),
+                      const Color(0xFF4F46E5),
+                      onTap: () => Navigator.pushNamed(context, '/recent-conversations'),
+                    ),
+                    _buildQuickActionCard(
+                      context,
+                      Icons.trending_up,
+                      'Learning Journey',
+                      'Adjust learning preferences',
+                      const Color(0xFFDCFCE7),
+                      const Color(0xFF16A34A),
+                      onTap: () => Navigator.pushNamed(context, '/learning-journey'),
+                    ),
+                    _buildQuickActionCard(
+                      context,
+                      Icons.book,
+                      'Story Time',
+                      'Browse magical stories',
+                      const Color(0xFFFEF3C7),
+                      const Color(0xFFD97706),
+                      onTap: () => Navigator.pushNamed(context, '/story-time'),
+                    ),
+                    _buildQuickActionCard(
+                      context,
+                      Icons.group_add,
+                      'Add Another Immy',
+                      'Link a new Immy bear',
+                      const Color(0xFFEDE9FE),
+                      const Color(0xFF8B5CF6),
+                      onTap: () => Navigator.pushNamed(context, '/device-management'),
+                    ),
+                    if (isAdmin)
+                      _buildQuickActionCard(
+                        context,
+                        Icons.qr_code,
+                        'Manage Devices',
+                        'Link a new Immy bear',
+                        const Color(0xFFEDE9FE),
+                        const Color(0xFF8B5CF6),
+                        onTap: () => Navigator.pushNamed(context, '/serial-management'),
+                      ),
+                  ],
+                ),
               ],
             ),
-            // Admin section
-            if (isAdmin) ...[
-              const SizedBox(height: 24),
-              const Text(
-                'Administration',
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 18,
-                ),
-              ),
-              const SizedBox(height: 16),
-              Card(
+          ),
+          
+          // Admin section
+          if (isAdmin)
+            Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Card(
+                elevation: 4,
+                shadowColor: Colors.red.withOpacity(0.2),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                 color: const Color(0xFFFEF2F2),
                 child: InkWell(
                   onTap: () => Navigator.pushNamed(context, '/admin/dashboard'),
+                  borderRadius: BorderRadius.circular(16),
                   child: const Padding(
                     padding: EdgeInsets.all(16.0),
                     child: Row(
                       children: [
                         CircleAvatar(
-                          radius: 20,
+                          radius: 24,
                           backgroundColor: Color(0xFFFEE2E2),
                           child: Icon(
                             Icons.admin_panel_settings,
-                            size: 20,
+                            size: 24,
                             color: Color(0xFFDC2626),
                           ),
                         ),
-                        SizedBox(width: 12),
+                        SizedBox(width: 16),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -528,7 +707,7 @@ class HomeContent extends StatelessWidget {
                                 'Admin Dashboard',
                                 style: TextStyle(
                                   fontWeight: FontWeight.bold,
-                                  fontSize: 16,
+                                  fontSize: 18,
                                 ),
                               ),
                               Text(
@@ -547,54 +726,10 @@ class HomeContent extends StatelessWidget {
                   ),
                 ),
               ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildQuickActionCard(
-    BuildContext context,
-    IconData icon,
-    String title,
-    String subtitle,
-    Color bgColor,
-    Color iconColor, {
-    VoidCallback? onTap,
-  }) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Card(
-        child: Padding(
-          padding: const EdgeInsets.all(12.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              CircleAvatar(
-                radius: 20,
-                backgroundColor: bgColor,
-                child: Icon(icon, size: 20, color: iconColor),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                title,
-                style: const TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 14,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                subtitle,
-                style: const TextStyle(
-                  fontSize: 12,
-                  color: Color(0xFF6B7280),
-                ),
-              ),
-            ],
-          ),
-        ),
+            ),
+            
+          const SizedBox(height: 20),
+        ],
       ),
     );
   }

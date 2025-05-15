@@ -27,11 +27,34 @@ import 'screens/conversation_detail_screen.dart';
 import 'screens/payment_history_screen.dart';
 import 'screens/learning_journey_screen.dart';
 import 'screens/story_time_screen.dart';
+import 'services/notification_service.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+
+// Global navigator key for deep linking from notifications
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 void main() async {
-  // Ensure Flutter is initialized
   WidgetsFlutterBinding.ensureInitialized();
-
+  
+  // Initialize notification service
+  await NotificationService().init();
+  
+  // Request notification permissions
+  final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin = 
+      FlutterLocalNotificationsPlugin();
+      
+  await flutterLocalNotificationsPlugin
+      .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+      ?.requestNotificationsPermission();
+      
+  await flutterLocalNotificationsPlugin
+      .resolvePlatformSpecificImplementation<IOSFlutterLocalNotificationsPlugin>()
+      ?.requestPermissions(
+        alert: true,
+        badge: true,
+        sound: true,
+      );
+  
   // Only initialize essential services for UI
   final serialService = SerialService();
   final apiService = ApiService();

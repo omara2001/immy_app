@@ -623,15 +623,15 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
             ),
 
-            // Notifications
+            // Notification Settings
             InkWell(
               onTap: _showNotificationSettings,
               child: _buildSettingsItem(
-                'Notifications',
-                'Insights and updates',
-                const Color(0xFFFEF3C7), // amber-100
-                const Color(0xFFD97706), // amber-600
-                Icons.notifications,
+                'Notification Settings',
+                'Manage app notifications',
+                const Color(0xFFECFDF5), // emerald-100
+                const Color(0xFF059669), // emerald-600
+                Icons.notifications_active,
               ),
             ),
 

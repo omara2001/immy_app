@@ -22,10 +22,13 @@ class AuthService {
   
   // Check if the current user is an admin
   Future<bool> isCurrentUserAdmin() async {
-    final currentUser = await getCurrentUser();
-    final isAdmin = currentUser?.isAdmin ?? false;
-    print("Admin auth service - isCurrentUserAdmin: $isAdmin");
-    return isAdmin;
+    try {
+      final user = await getCurrentUser();
+      return user?.isAdmin ?? false;
+    } catch (e) {
+      print('Error checking admin status: $e');
+      return false;
+    }
   }
   
   // Login with email and password

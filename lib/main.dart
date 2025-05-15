@@ -35,18 +35,18 @@ final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
+
   // Initialize notification service
   await NotificationService().init();
-  
+
   // Request notification permissions
-  final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin = 
+  final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
       FlutterLocalNotificationsPlugin();
-      
+
   await flutterLocalNotificationsPlugin
       .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
       ?.requestNotificationsPermission();
-      
+
   await flutterLocalNotificationsPlugin
       .resolvePlatformSpecificImplementation<IOSFlutterLocalNotificationsPlugin>()
       ?.requestPermissions(
@@ -54,7 +54,7 @@ void main() async {
         badge: true,
         sound: true,
       );
-  
+
   // Only initialize essential services for UI
   final serialService = SerialService();
   final apiService = ApiService();
